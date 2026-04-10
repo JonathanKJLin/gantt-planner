@@ -943,22 +943,22 @@ const DEFAULT_STATE = {
     { id: 'm9', name: 'Mina' },
   ],
   tasks: [
-    { id: 't1',  name: '診斷書',             projectId: 'p1', assigneeIds: ['m2', 'm3'], start: '2025-04-20', end: '2025-05-27' },
-    { id: 't2',  name: '一階',               projectId: 'p1', assigneeIds: ['m1'],       start: '2025-04-07', end: '2025-05-29' },
-    { id: 't3',  name: '二階',               projectId: 'p1', assigneeIds: ['m1'],       start: '2025-04-07', end: '2025-06-05' },
-    { id: 't4',  name: '盤點 & 流程標準手冊', projectId: 'p2', assigneeIds: ['m4', 'm5'], start: '2025-05-04', end: '2025-10-30' },
-    { id: 't5',  name: '藍圖',               projectId: 'p2', assigneeIds: ['m6'],       start: '2025-11-02', end: '2025-11-27' },
-    { id: 't6',  name: '系統建議書',          projectId: 'p2', assigneeIds: ['m1', 'm3'], start: '2025-09-28', end: '2025-11-27' },
-    { id: 't7',  name: '教育訓練－高階',      projectId: 'p4', assigneeIds: ['m6'],       start: '2025-05-02', end: '2025-06-01' },
-    { id: 't8',  name: '教育訓練－業務',      projectId: 'p4', assigneeIds: ['m2'],       start: '2025-08-01', end: '2025-09-15' },
-    { id: 't9',  name: '三階_元數據',         projectId: 'p3', assigneeIds: ['m7'],       start: '2025-06-08', end: '2025-07-31' },
-    { id: 't10', name: '三階_資料字典',       projectId: 'p3', assigneeIds: ['m7'],       start: '2025-08-10', end: '2025-09-25' },
-    { id: 't11', name: '三階_品質標準',       projectId: 'p3', assigneeIds: ['m7'],       start: '2025-10-05', end: '2025-11-20' },
+    { id: 't1',  name: '診斷書',             projectId: 'p1', assigneeIds: ['m2', 'm3'], start: '2026-04-20', end: '2026-05-27' },
+    { id: 't2',  name: '一階',               projectId: 'p1', assigneeIds: ['m1'],       start: '2026-04-07', end: '2026-05-29' },
+    { id: 't3',  name: '二階',               projectId: 'p1', assigneeIds: ['m1'],       start: '2026-04-07', end: '2026-06-05' },
+    { id: 't4',  name: '盤點 & 流程標準手冊', projectId: 'p2', assigneeIds: ['m4', 'm5'], start: '2026-05-04', end: '2026-10-30' },
+    { id: 't5',  name: '藍圖',               projectId: 'p2', assigneeIds: ['m6'],       start: '2026-11-02', end: '2026-11-27' },
+    { id: 't6',  name: '系統建議書',          projectId: 'p2', assigneeIds: ['m1', 'm3'], start: '2026-09-28', end: '2026-11-27' },
+    { id: 't7',  name: '教育訓練－高階',      projectId: 'p4', assigneeIds: ['m6'],       start: '2026-05-02', end: '2026-06-01' },
+    { id: 't8',  name: '教育訓練－業務',      projectId: 'p4', assigneeIds: ['m2'],       start: '2026-08-01', end: '2026-09-15' },
+    { id: 't9',  name: '三階_元數據',         projectId: 'p3', assigneeIds: ['m7'],       start: '2026-06-08', end: '2026-07-31' },
+    { id: 't10', name: '三階_資料字典',       projectId: 'p3', assigneeIds: ['m7'],       start: '2026-08-10', end: '2026-09-25' },
+    { id: 't11', name: '三階_品質標準',       projectId: 'p3', assigneeIds: ['m7'],       start: '2026-10-05', end: '2026-11-20' },
   ],
   viewMode: 'month',
   currentPage: 'gantt',
-  startDate: '2025-04-01',
-  endDate: '2025-11-30',
+  startDate: '2026-04-01',
+  endDate: '2026-11-30',
 };
 
 let state;
@@ -1155,7 +1155,8 @@ function isAssignedTo(t, personId) { return getAssigneeIds(t).includes(personId)
 // Overlap Detection
 // ═══════════════════════════════════════
 function detectOverlaps() {
-  const overlapMap = {};
+  const overlapMap = {};      // taskId -> Set (for global "has any overlap" check)
+  const personOverlapMap = {}; // "personId:taskId" -> true (per-person overlap)
   const overlapPeriods = [];
   const personTasks = {};
   state.tasks.forEach(t => {
@@ -1178,11 +1179,16 @@ function detectOverlaps() {
           if (!overlapMap[b.id]) overlapMap[b.id] = new Set();
           overlapMap[a.id].add(b.id);
           overlapMap[b.id].add(a.id);
+          personOverlapMap[personId + ':' + a.id] = true;
+          personOverlapMap[personId + ':' + b.id] = true;
         }
       }
     }
   }
-  return { overlapMap, overlapPeriods };
+  return { overlapMap, personOverlapMap, overlapPeriods };
+}
+function isOverlapForPerson(personOverlapMap, personId, taskId) {
+  return !!personOverlapMap[personId + ':' + taskId];
 }
 
 // ═══════════════════════════════════════
@@ -1372,7 +1378,7 @@ function setPage(page) {
 // ═══════════════════════════════════════
 function render() {
   saveState();
-  const { overlapMap, overlapPeriods } = detectOverlaps();
+  const { overlapMap, personOverlapMap, overlapPeriods } = detectOverlaps();
   const hideWeekend = document.getElementById('chkHideWeekend').checked;
   const timeStart = parseDate(state.startDate);
   const timeEnd = parseDate(state.endDate);
@@ -1381,11 +1387,11 @@ function render() {
   renderSidebar(overlapMap, overlapPeriods);
 
   if (state.viewMode === 'day') {
-    renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, overlapPeriods);
+    renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap, overlapPeriods);
   } else if (state.viewMode === 'week') {
-    renderWeekGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, overlapPeriods);
+    renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap, overlapPeriods);
   } else {
-    renderMonthGantt(timeStart, timeEnd, today, overlapMap, overlapPeriods);
+    renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPeriods);
   }
 
   if (state.currentPage === 'project') renderProjectView();
@@ -1446,7 +1452,7 @@ function renderSidebar(overlapMap, overlapPeriods) {
 // ═══════════════════════════════════════
 // Rendering — Day Gantt
 // ═══════════════════════════════════════
-function renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, overlapPeriods) {
+function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap, overlapPeriods) {
   const days = generateDays(timeStart, timeEnd, hideWeekend);
   const weeks = generateWeeks(timeStart, timeEnd);
   const dayWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--day-width'));
@@ -1473,7 +1479,7 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, over
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
     const { laneMap, laneCount } = assignLanes(pTasks);
     const rowH = Math.max(44, laneCount*(taskHeight+taskGap)+8);
-    const hasOL = pTasks.some(t => overlapMap[t.id]);
+    const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
     html += `<div class="gantt-row" style="height:${rowH}px"><div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div><div class="gantt-row-timeline" style="width:${totalWidth}px;height:${rowH}px">`;
     days.forEach((d, i) => { const isWB = d.getDay()===1; const isT = formatDate(d)===formatDate(today); html += `<div class="gantt-grid-line ${isT?'today':(isWB?'week-border':'')}" style="left:${i*dayWidth}px"></div>`; });
     overlapPeriods.filter(o => o.personId===person.id).forEach(o => {
@@ -1486,7 +1492,7 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, over
       if (hideWeekend) { si = dayIndex[t.start]; ei = dayIndex[t.end]; if(si===undefined){const c=days.filter(d=>d>=tS);si=c.length>0?dayIndex[formatDate(c[0])]:null;} if(ei===undefined){const c=days.filter(d=>d<=tE).reverse();ei=c.length>0?dayIndex[formatDate(c[0])]:null;} }
       else { si = dayIndex[t.start]; ei = dayIndex[t.end]; }
       if (si==null||ei==null) return;
-      const left=si*dayWidth, width=(ei-si+1)*dayWidth, lane=laneMap[t.id]||0, top=4+lane*(taskHeight+taskGap), ol=overlapMap[t.id];
+      const left=si*dayWidth, width=(ei-si+1)*dayWidth, lane=laneMap[t.id]||0, top=4+lane*(taskHeight+taskGap), ol=isOverlapForPerson(personOverlapMap, person.id, t.id);
       html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;background:${proj?.color||'#999'}" onclick="openTaskModal('${t.id}')" onmouseenter="showTooltip(event,'${t.id}')" onmousemove="moveTooltip(event)" onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
     });
     html += '</div></div>';
@@ -1498,7 +1504,7 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, over
 // ═══════════════════════════════════════
 // Rendering — Week Gantt
 // ═══════════════════════════════════════
-function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, overlapPeriods) {
+function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap, overlapPeriods) {
   const weeks = generateWeeks(timeStart, timeEnd);
   const weekWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--week-width'));
   let html = '<div class="gantt-header"><div class="gantt-header-row">';
@@ -1507,14 +1513,14 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, ove
   html += '</div></div><div class="gantt-body">';
   state.people.forEach(person => {
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
-    const hasOL = pTasks.some(t => overlapMap[t.id]);
+    const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
     html += `<div class="gantt-row"><div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div>`;
     weeks.forEach(w => {
       const tasksInWeek = pTasks.filter(t => { const ts=parseDate(t.start),te=parseDate(t.end); return ts<=w.end&&te>=w.start; });
       const olInWeek = overlapPeriods.some(o => o.personId===person.id && parseDate(o.overlapStart)<=w.end && parseDate(o.overlapEnd)>=w.start);
       const bg = olInWeek ? 'background:rgba(239,68,68,.08)' : '';
       html += `<div class="week-cell" style="width:${weekWidth}px;${bg}">`;
-      tasksInWeek.forEach(t => { const proj=state.projects.find(p=>p.id===t.projectId); const ol=overlapMap[t.id];
+      tasksInWeek.forEach(t => { const proj=state.projects.find(p=>p.id===t.projectId); const ol=isOverlapForPerson(personOverlapMap, person.id, t.id);
         html += `<div class="week-task-chip ${ol?'overlap':''}" style="background:${proj?.color||'#999'}" onclick="openTaskModal('${t.id}')" onmouseenter="showTooltip(event,'${t.id}')" onmousemove="moveTooltip(event)" onmouseleave="hideTooltip()" title="${t.name}">${t.name}</div>`;
       });
       html += '</div>';
@@ -1539,7 +1545,7 @@ function generateMonths(start, end) {
   return months;
 }
 
-function renderMonthGantt(timeStart, timeEnd, today, overlapMap, overlapPeriods) {
+function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPeriods) {
   const months = generateMonths(timeStart, timeEnd);
   const monthWidth = 160;
   const taskHeight = 24;
@@ -1557,7 +1563,7 @@ function renderMonthGantt(timeStart, timeEnd, today, overlapMap, overlapPeriods)
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
     const { laneMap, laneCount } = assignLanes(pTasks);
     const rowH = Math.max(40, laneCount * (taskHeight + taskGap) + 8);
-    const hasOL = pTasks.some(t => overlapMap[t.id]);
+    const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
 
     html += `<div class="gantt-row" style="height:${rowH}px">`;
     html += `<div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div>`;
@@ -1582,7 +1588,7 @@ function renderMonthGantt(timeStart, timeEnd, today, overlapMap, overlapPeriods)
       const width = Math.max(right - left, 4);
       const lane = laneMap[t.id] || 0;
       const top = 4 + lane * (taskHeight + taskGap);
-      const ol = overlapMap[t.id];
+      const ol = isOverlapForPerson(personOverlapMap, person.id, t.id);
 
       html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;height:${taskHeight}px;background:${proj?.color||'#999'};font-size:.68rem"
         onclick="openTaskModal('${t.id}')"
