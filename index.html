@@ -697,6 +697,7 @@ input[type="date"], select {
   <div class="topbar-right">
     <button class="btn" onclick="importData()">匯入 JSON</button>
     <button class="btn" onclick="exportData()">匯出 JSON</button>
+    <button class="btn" onclick="exportNotionCSV()" style="border-color:#a78bfa;color:#7c3aed">匯出 Notion CSV</button>
     <button class="btn btn-primary" onclick="openTaskModal()">＋ 新增任務</button>
   </div>
 </div>
@@ -775,6 +776,31 @@ input[type="date"], select {
 </div>
 
 <input type="file" id="fileInput" accept=".json" style="display:none" onchange="handleImport(event)">
+
+<!-- Notion Guide Modal -->
+<div class="modal-overlay" id="notionGuideOverlay" onclick="if(event.target===this)closeNotionGuide()">
+  <div class="modal" style="width:560px">
+    <div class="modal-header">
+      <h2>Notion 匯入指引</h2>
+      <button class="modal-close" onclick="closeNotionGuide()">&times;</button>
+    </div>
+    <div class="modal-body" style="font-size:.88rem;line-height:1.7">
+      <p style="margin-bottom:12px">CSV 已下載完成。請依以下步驟在 Notion 建立共用排程資料庫：</p>
+      <div style="background:#f8f9fb;border-radius:8px;padding:16px;margin-bottom:16px">
+        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 1</strong>　打開 Notion → 任意頁面 → 右上角 <code>···</code> → <strong>Import</strong> → <strong>CSV</strong> → 選擇剛才下載的檔案</div>
+        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 2</strong>　匯入後會產生一個 Database。點進去，將「開始日期」和「結束日期」欄位的 property type 改成 <strong>Date</strong></div>
+        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 3</strong>　點右上角 <strong>＋ Add a view</strong> → 選 <strong>Timeline</strong> → 時間範圍設為「開始日期」到「結束日期」→ 這就是你的<strong>甘特圖</strong></div>
+        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 4</strong>　在 Timeline 視圖點 <strong>Group</strong> → 選「專案」→ 即可看到依專案分組的甘特圖</div>
+        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 5</strong>　再加一個 <strong>Board view</strong>，Group by「負責人」→ 一眼看出每人工作量</div>
+        <div><strong style="color:var(--accent)">Step 6</strong>　點右上角 <strong>Share</strong> → 邀請團隊成員 → 大家就能共同編輯了</div>
+      </div>
+      <p style="color:var(--text-secondary);font-size:.82rem">建議的 Notion Views：<strong>Timeline</strong>（甘特圖）、<strong>Table</strong>（總覽）、<strong>Board by 負責人</strong>（人員負載）、<strong>Board by 專案</strong>（專案進度）</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeNotionGuide()">知道了</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ═══════════════════════════════════════
@@ -1321,6 +1347,57 @@ function exportData() {
   const a = document.createElement('a'); a.href = url; a.download = `gantt-planner-${formatDate(new Date())}.json`; a.click();
   URL.revokeObjectURL(url);
 }
+
+// ═══════════════════════════════════════
+// Notion CSV Export
+// ═══════════════════════════════════════
+function exportNotionCSV() {
+  const BOM = '\uFEFF';
+  const headers = ['任務名稱', '專案', '負責人', '開始日期', '結束日期', '天數'];
+  const rows = state.tasks
+    .sort((a, b) => {
+      const pi = state.projects.findIndex(p => p.id === a.projectId) - state.projects.findIndex(p => p.id === b.projectId);
+      return pi !== 0 ? pi : parseDate(a.start) - parseDate(b.start);
+    })
+    .map(t => {
+      const proj = state.projects.find(p => p.id === t.projectId);
+      const person = state.people.find(p => p.id === t.assigneeId);
+      const dur = taskDuration(t);
+      const fmtDate = s => { const d = parseDate(s); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`; };
+      return [
+        csvEscape(t.name),
+        csvEscape(proj?.name.split('—')[0].trim() || ''),
+        csvEscape(person?.name || ''),
+        fmtDate(t.start),
+        fmtDate(t.end),
+        dur
+      ].join(',');
+    });
+
+  const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `gantt-planner-notion-${formatDate(new Date())}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  document.getElementById('notionGuideOverlay').classList.add('open');
+}
+
+function csvEscape(val) {
+  const s = String(val);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function closeNotionGuide() {
+  document.getElementById('notionGuideOverlay').classList.remove('open');
+}
+
 function importData() { document.getElementById('fileInput').click(); }
 function handleImport(e) {
   const file = e.target.files[0]; if (!file) return;
