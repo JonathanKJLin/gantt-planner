@@ -893,6 +893,31 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   </div>
 </div>
 
+<!-- Person Edit Modal -->
+<div class="modal-overlay" id="personModalOverlay" onclick="if(event.target===this)closePersonModal()">
+  <div class="modal" style="width:400px">
+    <div class="modal-header">
+      <h2 id="personModalTitle">編輯成員</h2>
+      <button class="modal-close" onclick="closePersonModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="personEditId">
+      <div class="form-group">
+        <label>名稱</label>
+        <input type="text" id="personEditName" placeholder="成員名稱">
+      </div>
+      <div class="form-group">
+        <label>身份</label>
+        <select id="personEditRole"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closePersonModal()">取消</button>
+      <button class="btn btn-primary" onclick="savePersonEdit()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="fileInput" accept=".json" style="display:none" onchange="handleImport(event)">
 
 <!-- Notion Guide Modal -->
@@ -929,17 +954,18 @@ const DEFAULT_STATE = {
     { id: 'p1', name: 'DMG - 合庫', color: '#3b82f6' },
   ],
   people: [
-    { id: 'm1', name: 'Jonathan' },
-    { id: 'm2', name: 'Maggie' },
-    { id: 'm3', name: 'Steff' },
-    { id: 'm4', name: 'Ellen' },
-    { id: 'm5', name: 'Gina' },
-    { id: 'm6', name: 'Bennett' },
-    { id: 'm7', name: 'Vicky' },
-    { id: 'm8', name: 'Astrid' },
-    { id: 'm9', name: 'Mina' },
-    { id: 'm10', name: 'Jane' },
+    { id: 'm1', name: 'Jonathan', role: '實習生' },
+    { id: 'm2', name: 'Maggie', role: '實習生' },
+    { id: 'm3', name: 'Steff', role: '實習生' },
+    { id: 'm4', name: 'Ellen', role: '正職' },
+    { id: 'm5', name: 'Gina', role: '正職' },
+    { id: 'm6', name: 'Bennett', role: '實習生' },
+    { id: 'm7', name: 'Vicky', role: '正職' },
+    { id: 'm8', name: 'Astrid', role: '正職' },
+    { id: 'm9', name: 'Mina', role: '正職' },
+    { id: 'm10', name: 'Jane', role: '正職' },
   ],
+  roles: ['正職', '實習生'],
   tasks: [
     { id: 't1',  name: '診斷書',             projectId: 'p1', assigneeIds: ['m2', 'm3'], start: '2026-04-20', end: '2026-05-27' },
     { id: 't2',  name: '一階',               projectId: 'p1', assigneeIds: ['m1'],       start: '2026-04-07', end: '2026-05-29' },
@@ -979,6 +1005,16 @@ function setSyncStatus(status) {
   text.textContent = labels[status] || status;
 }
 
+const ROLE_COLORS = {
+  '正職': '#f59e0b',
+  '實習生': '#9ca3af',
+};
+const DEFAULT_ROLE_COLOR = '#6b7280';
+
+function getRoleColor(person) {
+  return ROLE_COLORS[person?.role] || DEFAULT_ROLE_COLOR;
+}
+
 function migrateState(s) {
   if (!s || !s.tasks) return;
   s.tasks.forEach(t => {
@@ -987,6 +1023,7 @@ function migrateState(s) {
       delete t.assigneeId;
     }
   });
+  if (!s.roles) s.roles = ['正職', '實習生'];
 }
 
 function loadStateLocal() {
@@ -1287,10 +1324,49 @@ function deleteProject() {
 // People Management
 // ═══════════════════════════════════════
 function addPerson() {
-  const name = prompt('請輸入新成員名稱：');
-  if (!name || !name.trim()) return;
-  const newId = 'm' + Date.now().toString(36);
-  state.people.push({ id: newId, name: name.trim() });
+  document.getElementById('personModalTitle').textContent = '新增成員';
+  document.getElementById('personEditId').value = '';
+  document.getElementById('personEditName').value = '';
+  populateRoleDropdown('');
+  document.getElementById('personModalOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('personEditName').focus(), 100);
+}
+
+function openPersonModal(personId) {
+  const p = state.people.find(x => x.id === personId);
+  if (!p) return;
+  document.getElementById('personModalTitle').textContent = '編輯成員';
+  document.getElementById('personEditId').value = p.id;
+  document.getElementById('personEditName').value = p.name;
+  populateRoleDropdown(p.role || '');
+  document.getElementById('personModalOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('personEditName').focus(), 100);
+}
+
+function closePersonModal() {
+  document.getElementById('personModalOverlay').classList.remove('open');
+}
+
+function populateRoleDropdown(current) {
+  const roles = state.roles || ['正職', '實習生'];
+  document.getElementById('personEditRole').innerHTML = roles.map(r =>
+    `<option value="${r}" ${r===current?'selected':''}>${r}</option>`
+  ).join('');
+}
+
+function savePersonEdit() {
+  const id = document.getElementById('personEditId').value;
+  const name = document.getElementById('personEditName').value.trim();
+  const role = document.getElementById('personEditRole').value;
+  if (!name) return alert('請輸入名稱');
+  if (id) {
+    const p = state.people.find(x => x.id === id);
+    if (p) { p.name = name; p.role = role; }
+  } else {
+    const newId = 'm' + Date.now().toString(36);
+    state.people.push({ id: newId, name, role });
+  }
+  closePersonModal();
   render();
 }
 
@@ -1415,12 +1491,12 @@ function renderSidebar(overlapMap, overlapPeriods) {
   document.getElementById('peopleList').innerHTML = state.people.map(p => {
     const taskCount = state.tasks.filter(t => isAssignedTo(t, p.id)).length;
     const olc = personOverloads[p.id] || 0;
-    const hue = (strHash(p.name || p.id) * 37) % 360;
+    const rc = getRoleColor(p);
     return `<div class="person-item" draggable="true" data-drag-id="${p.id}" data-drag-type="person"
       ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
       <span class="drag-handle">⋮⋮</span>
-      <div class="person-avatar" style="background:hsl(${hue},55%,55%)">${p.name[0]}</div>
-      <div class="person-info"><div class="person-name">${p.name}</div><div class="person-tasks-count">${taskCount} 項任務</div></div>
+      <div class="person-avatar" style="background:${rc}">${p.name[0]}</div>
+      <div class="person-info" onclick="event.stopPropagation();openPersonModal('${p.id}')" style="cursor:pointer"><div class="person-name">${p.name} <span style="font-size:.65rem;opacity:.5">✎</span></div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務</div></div>
       ${olc ? `<span class="person-overload">${olc} 重疊</span>` : ''}
       <button class="btn-sm" onclick="event.stopPropagation();removePerson('${p.id}')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:.85rem;font-weight:700;padding:2px 4px;opacity:.7;transition:opacity .15s" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.7">&times;</button>
     </div>`;
