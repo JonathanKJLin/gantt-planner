@@ -487,6 +487,31 @@ input[type="date"], select {
   justify-content: flex-end;
 }
 
+/* ── Multi-Select (Assignee) ── */
+.multi-select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.multi-select-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: .88rem;
+  font-weight: 400;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  margin-bottom: 0;
+}
+.multi-select-item:hover { background: #f5f7fa; }
+.multi-select-item input[type="checkbox"] { width: auto; padding: 0; }
+
 /* ── Task List in Sidebar ── */
 .task-list-item {
   display: flex;
@@ -783,8 +808,8 @@ input[type="date"], select {
         <select id="taskProject"></select>
       </div>
       <div class="form-group">
-        <label>負責人</label>
-        <select id="taskAssignee"></select>
+        <label>負責人（可多選）</label>
+        <div class="multi-select" id="assigneeSelect"></div>
       </div>
       <div class="form-group">
         <label>開始日期</label>
@@ -853,27 +878,27 @@ const DEFAULT_STATE = {
     { id: 'm10', name: 'Jack' },
   ],
   tasks: [
-    { id: 't1',  name: 'API 架構設計',      projectId: 'p1', assigneeId: 'm1', start: '2026-04-13', end: '2026-04-17' },
-    { id: 't2',  name: '資料庫 Schema',     projectId: 'p1', assigneeId: 'm2', start: '2026-04-13', end: '2026-04-22' },
-    { id: 't3',  name: '認證模組開發',       projectId: 'p1', assigneeId: 'm3', start: '2026-04-13', end: '2026-04-15' },
-    { id: 't4',  name: '後端 CI/CD 建置',   projectId: 'p1', assigneeId: 'm4', start: '2026-04-13', end: '2026-04-17' },
-    { id: 't5',  name: 'API Endpoint 實作', projectId: 'p1', assigneeId: 'm1', start: '2026-04-20', end: '2026-04-28' },
-    { id: 't6',  name: '效能調校',          projectId: 'p1', assigneeId: 'm5', start: '2026-04-27', end: '2026-05-01' },
-    { id: 't7',  name: '負載測試',          projectId: 'p1', assigneeId: 'm6', start: '2026-05-04', end: '2026-05-08' },
-    { id: 't8',  name: 'UI 元件庫建置',     projectId: 'p2', assigneeId: 'm3', start: '2026-04-16', end: '2026-04-24' },
-    { id: 't9',  name: '首頁切版',          projectId: 'p2', assigneeId: 'm7', start: '2026-04-13', end: '2026-04-17' },
-    { id: 't10', name: '使用者儀表板',       projectId: 'p2', assigneeId: 'm2', start: '2026-04-20', end: '2026-04-24' },
-    { id: 't11', name: '表單系統開發',       projectId: 'p2', assigneeId: 'm8', start: '2026-04-20', end: '2026-05-01' },
-    { id: 't12', name: '前端狀態管理',       projectId: 'p2', assigneeId: 'm7', start: '2026-04-20', end: '2026-04-28' },
-    { id: 't13', name: 'RWD 響應式調整',    projectId: 'p2', assigneeId: 'm9', start: '2026-05-04', end: '2026-05-12' },
-    { id: 't14', name: '舊系統資料盤點',     projectId: 'p3', assigneeId: 'm4', start: '2026-04-14', end: '2026-04-17' },
-    { id: 't15', name: 'ETL Pipeline',      projectId: 'p3', assigneeId: 'm5', start: '2026-04-20', end: '2026-04-29' },
-    { id: 't16', name: '資料驗證腳本',       projectId: 'p3', assigneeId: 'm6', start: '2026-04-20', end: '2026-04-24' },
-    { id: 't17', name: '報表儀表板',         projectId: 'p3', assigneeId: 'm10', start: '2026-04-27', end: '2026-05-05' },
-    { id: 't18', name: '資料品質監控',       projectId: 'p3', assigneeId: 'm5', start: '2026-04-27', end: '2026-05-01' },
-    { id: 't19', name: '上線切換計畫',       projectId: 'p3', assigneeId: 'm4', start: '2026-05-04', end: '2026-05-08' },
-    { id: 't20', name: '跨專案協調會議',     projectId: 'p2', assigneeId: 'm2', start: '2026-04-21', end: '2026-04-23' },
-    { id: 't21', name: '緊急 Bug 修復',     projectId: 'p1', assigneeId: 'm4', start: '2026-04-15', end: '2026-04-18' },
+    { id: 't1',  name: 'API 架構設計',      projectId: 'p1', assigneeIds: ['m1', 'm3'], start: '2026-04-13', end: '2026-04-17' },
+    { id: 't2',  name: '資料庫 Schema',     projectId: 'p1', assigneeIds: ['m2'], start: '2026-04-13', end: '2026-04-22' },
+    { id: 't3',  name: '認證模組開發',       projectId: 'p1', assigneeIds: ['m3'], start: '2026-04-13', end: '2026-04-15' },
+    { id: 't4',  name: '後端 CI/CD 建置',   projectId: 'p1', assigneeIds: ['m4'], start: '2026-04-13', end: '2026-04-17' },
+    { id: 't5',  name: 'API Endpoint 實作', projectId: 'p1', assigneeIds: ['m1'], start: '2026-04-20', end: '2026-04-28' },
+    { id: 't6',  name: '效能調校',          projectId: 'p1', assigneeIds: ['m5'], start: '2026-04-27', end: '2026-05-01' },
+    { id: 't7',  name: '負載測試',          projectId: 'p1', assigneeIds: ['m6'], start: '2026-05-04', end: '2026-05-08' },
+    { id: 't8',  name: 'UI 元件庫建置',     projectId: 'p2', assigneeIds: ['m3'], start: '2026-04-16', end: '2026-04-24' },
+    { id: 't9',  name: '首頁切版',          projectId: 'p2', assigneeIds: ['m7'], start: '2026-04-13', end: '2026-04-17' },
+    { id: 't10', name: '使用者儀表板',       projectId: 'p2', assigneeIds: ['m2'], start: '2026-04-20', end: '2026-04-24' },
+    { id: 't11', name: '表單系統開發',       projectId: 'p2', assigneeIds: ['m8'], start: '2026-04-20', end: '2026-05-01' },
+    { id: 't12', name: '前端狀態管理',       projectId: 'p2', assigneeIds: ['m7'], start: '2026-04-20', end: '2026-04-28' },
+    { id: 't13', name: 'RWD 響應式調整',    projectId: 'p2', assigneeIds: ['m9'], start: '2026-05-04', end: '2026-05-12' },
+    { id: 't14', name: '舊系統資料盤點',     projectId: 'p3', assigneeIds: ['m4'], start: '2026-04-14', end: '2026-04-17' },
+    { id: 't15', name: 'ETL Pipeline',      projectId: 'p3', assigneeIds: ['m5'], start: '2026-04-20', end: '2026-04-29' },
+    { id: 't16', name: '資料驗證腳本',       projectId: 'p3', assigneeIds: ['m6'], start: '2026-04-20', end: '2026-04-24' },
+    { id: 't17', name: '報表儀表板',         projectId: 'p3', assigneeIds: ['m10'], start: '2026-04-27', end: '2026-05-05' },
+    { id: 't18', name: '資料品質監控',       projectId: 'p3', assigneeIds: ['m5'], start: '2026-04-27', end: '2026-05-01' },
+    { id: 't19', name: '上線切換計畫',       projectId: 'p3', assigneeIds: ['m4'], start: '2026-05-04', end: '2026-05-08' },
+    { id: 't20', name: '跨專案協調會議',     projectId: 'p2', assigneeIds: ['m2', 'm1', 'm5'], start: '2026-04-21', end: '2026-04-23' },
+    { id: 't21', name: '緊急 Bug 修復',     projectId: 'p1', assigneeIds: ['m4'], start: '2026-04-15', end: '2026-04-18' },
   ],
   viewMode: 'day',
   currentPage: 'gantt',
@@ -901,12 +926,25 @@ function setSyncStatus(status) {
   text.textContent = labels[status] || status;
 }
 
+function migrateState(s) {
+  if (!s || !s.tasks) return;
+  s.tasks.forEach(t => {
+    if (t.assigneeId && !t.assigneeIds) {
+      t.assigneeIds = [t.assigneeId];
+      delete t.assigneeId;
+    }
+  });
+}
+
 function loadStateLocal() {
   try {
     const saved = localStorage.getItem('gantt-planner-state');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.projects && parsed.people && parsed.tasks) return parsed;
+      if (parsed.projects && parsed.people && parsed.tasks) {
+        migrateState(parsed);
+        return parsed;
+      }
     }
   } catch {}
   return null;
@@ -927,6 +965,7 @@ async function loadState() {
 
     if (data?.data && data.data.tasks && data.data.tasks.length > 0) {
       state = data.data;
+      migrateState(state);
       localStorage.setItem('gantt-planner-state', JSON.stringify(state));
       setSyncStatus('connected');
     } else if (local && local.tasks && local.tasks.length > 0) {
@@ -984,6 +1023,7 @@ function subscribeToRealtime() {
       if (ignoreNextRealtime) return;
       const remote = payload.new?.data;
       if (remote && remote.tasks) {
+        migrateState(remote);
         const localPage = state.currentPage;
         const localView = state.viewMode;
         state = { ...remote, currentPage: localPage, viewMode: localView };
@@ -1050,6 +1090,13 @@ const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 function uid() { return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 // ═══════════════════════════════════════
+// Assignee Helpers
+// ═══════════════════════════════════════
+function getAssigneeIds(t) { return t.assigneeIds || (t.assigneeId ? [t.assigneeId] : []); }
+function getAssigneeNames(t) { return getAssigneeIds(t).map(id => state.people.find(p=>p.id===id)?.name || '?').join(', '); }
+function isAssignedTo(t, personId) { return getAssigneeIds(t).includes(personId); }
+
+// ═══════════════════════════════════════
 // Overlap Detection
 // ═══════════════════════════════════════
 function detectOverlaps() {
@@ -1057,8 +1104,10 @@ function detectOverlaps() {
   const overlapPeriods = [];
   const personTasks = {};
   state.tasks.forEach(t => {
-    if (!personTasks[t.assigneeId]) personTasks[t.assigneeId] = [];
-    personTasks[t.assigneeId].push(t);
+    getAssigneeIds(t).forEach(pid => {
+      if (!personTasks[pid]) personTasks[pid] = [];
+      personTasks[pid].push(t);
+    });
   });
   for (const [personId, tasks] of Object.entries(personTasks)) {
     for (let i = 0; i < tasks.length; i++) {
@@ -1148,7 +1197,7 @@ function renderSidebar(overlapMap, overlapPeriods) {
 
   document.getElementById('peopleCount').textContent = state.people.length;
   document.getElementById('peopleList').innerHTML = state.people.map(p => {
-    const taskCount = state.tasks.filter(t => t.assigneeId === p.id).length;
+    const taskCount = state.tasks.filter(t => isAssignedTo(t, p.id)).length;
     const olc = personOverloads[p.id] || 0;
     const hue = (parseInt(p.id.replace('m','')) * 37) % 360;
     return `<div class="person-item">
@@ -1173,11 +1222,10 @@ function renderSidebar(overlapMap, overlapPeriods) {
     .sort((a, b) => parseDate(a.start) - parseDate(b.start))
     .map(t => {
       const proj = state.projects.find(p => p.id === t.projectId);
-      const person = state.people.find(p => p.id === t.assigneeId);
       const hasOL = overlapMap[t.id];
       return `<div class="task-list-item" onclick="openTaskModal('${t.id}')">
         <div class="task-list-dot" style="background:${proj?.color||'#999'}"></div>
-        <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${person?.name||'?'} · ${t.start} → ${t.end}</div></div>
+        <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${getAssigneeNames(t)} · ${t.start} → ${t.end}</div></div>
         <div class="task-list-actions"><button class="btn btn-sm" onclick="event.stopPropagation();openTaskModal('${t.id}')">編輯</button></div>
       </div>`;
     }).join('');
@@ -1210,7 +1258,7 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, over
   });
   html += '</div></div><div class="gantt-body">';
   state.people.forEach(person => {
-    const pTasks = state.tasks.filter(t => t.assigneeId === person.id);
+    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
     const { laneMap, laneCount } = assignLanes(pTasks);
     const rowH = Math.max(44, laneCount*(taskHeight+taskGap)+8);
     const hasOL = pTasks.some(t => overlapMap[t.id]);
@@ -1246,7 +1294,7 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, ove
   weeks.forEach(w => { html += `<div class="gantt-week-header" style="width:${weekWidth}px;font-size:.65rem;line-height:1.3">${w.label}</div>`; });
   html += '</div></div><div class="gantt-body">';
   state.people.forEach(person => {
-    const pTasks = state.tasks.filter(t => t.assigneeId===person.id);
+    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
     const hasOL = pTasks.some(t => overlapMap[t.id]);
     html += `<div class="gantt-row"><div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div>`;
     weeks.forEach(w => {
@@ -1275,11 +1323,13 @@ function renderProjectView() {
   // Per-project sections
   state.projects.forEach(proj => {
     const projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a,b) => parseDate(a.start)-parseDate(b.start));
-    const totalDays = projTasks.reduce((s,t) => s + taskDuration(t), 0);
+    const totalDays = projTasks.reduce((s,t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     const participantMap = {};
     projTasks.forEach(t => {
-      if (!participantMap[t.assigneeId]) participantMap[t.assigneeId] = 0;
-      participantMap[t.assigneeId] += taskDuration(t);
+      getAssigneeIds(t).forEach(pid => {
+        if (!participantMap[pid]) participantMap[pid] = 0;
+        participantMap[pid] += taskDuration(t);
+      });
     });
     const participants = Object.entries(participantMap)
       .map(([id, days]) => ({ person: state.people.find(p=>p.id===id), days }))
@@ -1301,12 +1351,11 @@ function renderProjectView() {
     html += `<div class="pv-table-wrap"><table class="pv-table">
       <thead><tr><th>任務名稱</th><th>負責人</th><th>開始</th><th>結束</th><th style="text-align:right">天數</th><th></th></tr></thead><tbody>`;
     projTasks.forEach(t => {
-      const person = state.people.find(p=>p.id===t.assigneeId);
       const dur = taskDuration(t);
       const ol = overlapMap[t.id];
       html += `<tr>
         <td class="pv-task-name">${t.name}${ol ? '<span class="pv-overlap-badge">⚠ 重疊</span>' : ''}</td>
-        <td>${person?.name || '?'}</td>
+        <td>${getAssigneeNames(t)}</td>
         <td>${shortDate(t.start)}</td>
         <td>${shortDate(t.end)}</td>
         <td style="text-align:right;font-weight:600">${dur} 天</td>
@@ -1341,7 +1390,7 @@ function renderProjectView() {
     let projCount = 0;
     let cells = '';
     state.projects.forEach(proj => {
-      const days = state.tasks.filter(t => t.assigneeId===person.id && t.projectId===proj.id).reduce((s,t) => s+taskDuration(t), 0);
+      const days = state.tasks.filter(t => isAssignedTo(t, person.id) && t.projectId===proj.id).reduce((s,t) => s+taskDuration(t), 0);
       rowTotal += days;
       if (days > 0) projCount++;
       cells += days > 0
@@ -1355,7 +1404,7 @@ function renderProjectView() {
   html += '<tr class="pv-row-total"><td>合計</td>';
   let grandTotal = 0;
   state.projects.forEach(proj => {
-    const d = state.tasks.filter(t=>t.projectId===proj.id).reduce((s,t)=>s+taskDuration(t),0);
+    const d = state.tasks.filter(t=>t.projectId===proj.id).reduce((s,t)=>s+taskDuration(t)*getAssigneeIds(t).length,0);
     grandTotal += d;
     html += `<td style="color:${proj.color}">${d} 天</td>`;
   });
@@ -1372,7 +1421,6 @@ function showTooltip(e, taskId) {
   const t = state.tasks.find(x => x.id === taskId);
   if (!t) return;
   const proj = state.projects.find(p => p.id === t.projectId);
-  const person = state.people.find(p => p.id === t.assigneeId);
   const dur = taskDuration(t);
   const { overlapPeriods } = detectOverlaps();
   const related = overlapPeriods.filter(o => o.task1.id===taskId || o.task2.id===taskId);
@@ -1384,7 +1432,7 @@ function showTooltip(e, taskId) {
     }).join('')}</div>`;
   }
   const tip = document.getElementById('tooltip');
-  tip.innerHTML = `<div class="tt-title">${t.name}</div><div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${person?.name||'?'}</div><div class="tt-row"><span class="tt-label">期間：</span>${t.start} → ${t.end} (${dur}天)</div>${olHtml}`;
+  tip.innerHTML = `<div class="tt-title">${t.name}</div><div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${getAssigneeNames(t)}</div><div class="tt-row"><span class="tt-label">期間：</span>${t.start} → ${t.end} (${dur}天)</div>${olHtml}`;
   tip.style.display = 'block';
   moveTooltip(e);
 }
@@ -1400,19 +1448,25 @@ function hideTooltip() { document.getElementById('tooltip').style.display = 'non
 // ═══════════════════════════════════════
 function populateModalDropdowns() {
   document.getElementById('taskProject').innerHTML = state.projects.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-  document.getElementById('taskAssignee').innerHTML = state.people.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('assigneeSelect').innerHTML = state.people.map(p =>
+    `<label class="multi-select-item"><input type="checkbox" value="${p.id}" class="assignee-cb"> ${p.name}</label>`
+  ).join('');
 }
 function openTaskModal(taskId) {
   populateModalDropdowns();
   const modal = document.getElementById('modalOverlay');
   const deleteBtn = document.getElementById('btnDeleteTask');
+  document.querySelectorAll('.assignee-cb').forEach(cb => cb.checked = false);
   if (taskId) {
     const t = state.tasks.find(x => x.id === taskId); if (!t) return;
     document.getElementById('modalTitle').textContent = '編輯任務';
     document.getElementById('taskId').value = t.id;
     document.getElementById('taskName').value = t.name;
     document.getElementById('taskProject').value = t.projectId;
-    document.getElementById('taskAssignee').value = t.assigneeId;
+    const ids = getAssigneeIds(t);
+    document.querySelectorAll('.assignee-cb').forEach(cb => {
+      cb.checked = ids.includes(cb.value);
+    });
     document.getElementById('taskStart').value = t.start;
     document.getElementById('taskEnd').value = t.end;
     deleteBtn.style.display = '';
@@ -1432,14 +1486,15 @@ function saveTask() {
   const id = document.getElementById('taskId').value;
   const name = document.getElementById('taskName').value.trim();
   const projectId = document.getElementById('taskProject').value;
-  const assigneeId = document.getElementById('taskAssignee').value;
+  const assigneeIds = [...document.querySelectorAll('.assignee-cb:checked')].map(cb => cb.value);
   const start = document.getElementById('taskStart').value;
   const end = document.getElementById('taskEnd').value;
   if (!name) return alert('請輸入任務名稱');
+  if (assigneeIds.length === 0) return alert('請至少選擇一位負責人');
   if (!start || !end) return alert('請選擇日期');
   if (parseDate(start) > parseDate(end)) return alert('結束日期不可早於開始日期');
-  if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, {name,projectId,assigneeId,start,end}); }
-  else { state.tasks.push({id:uid(),name,projectId,assigneeId,start,end}); }
+  if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, {name,projectId,assigneeIds,start,end}); }
+  else { state.tasks.push({id:uid(),name,projectId,assigneeIds,start,end}); }
   closeModal(); render();
 }
 function deleteTask() {
@@ -1486,13 +1541,12 @@ function exportNotionCSV() {
     })
     .map(t => {
       const proj = state.projects.find(p => p.id === t.projectId);
-      const person = state.people.find(p => p.id === t.assigneeId);
       const dur = taskDuration(t);
       const fmtDate = s => { const d = parseDate(s); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`; };
       return [
         csvEscape(t.name),
         csvEscape(proj?.name.split('—')[0].trim() || ''),
-        csvEscape(person?.name || ''),
+        csvEscape(getAssigneeNames(t)),
         fmtDate(t.start),
         fmtDate(t.end),
         dur
@@ -1537,12 +1591,11 @@ function exportExcel() {
     })
     .map(t => {
       const proj = state.projects.find(p => p.id === t.projectId);
-      const person = state.people.find(p => p.id === t.assigneeId);
       const { overlapMap } = detectOverlaps();
       return {
         '任務名稱': t.name,
         '專案': proj?.name || '',
-        '負責人': person?.name || '',
+        '負責人': getAssigneeNames(t),
         '開始日期': parseDate(t.start),
         '結束日期': parseDate(t.end),
         '天數': taskDuration(t),
@@ -1560,10 +1613,9 @@ function exportExcel() {
       .filter(t => t.projectId === proj.id)
       .sort((a, b) => parseDate(a.start) - parseDate(b.start))
       .map(t => {
-        const person = state.people.find(p => p.id === t.assigneeId);
         return {
           '任務名稱': t.name,
-          '負責人': person?.name || '',
+          '負責人': getAssigneeNames(t),
           '開始日期': parseDate(t.start),
           '結束日期': parseDate(t.end),
           '天數': taskDuration(t)
@@ -1584,7 +1636,7 @@ function exportExcel() {
     let projCount = 0;
     state.projects.forEach(proj => {
       const days = state.tasks
-        .filter(t => t.assigneeId === person.id && t.projectId === proj.id)
+        .filter(t => isAssignedTo(t, person.id) && t.projectId === proj.id)
         .reduce((s, t) => s + taskDuration(t), 0);
       const colName = proj.name.split('—')[0].trim();
       row[colName] = days || '';
@@ -1598,7 +1650,7 @@ function exportExcel() {
   const totalsRow = { '成員': '合計' };
   let grand = 0;
   state.projects.forEach(proj => {
-    const d = state.tasks.filter(t => t.projectId === proj.id).reduce((s, t) => s + taskDuration(t), 0);
+    const d = state.tasks.filter(t => t.projectId === proj.id).reduce((s, t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     totalsRow[proj.name.split('—')[0].trim()] = d;
     grand += d;
   });
@@ -1638,6 +1690,7 @@ function handleImport(e) {
     try {
       const data = JSON.parse(evt.target.result);
       if (!data.projects||!data.people||!data.tasks) throw new Error('Invalid format');
+      migrateState(data);
       state = data; saveState(); syncDateInputs(); render(); alert('匯入成功！');
     } catch (err) { alert('匯入失敗：'+err.message); }
   };
