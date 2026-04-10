@@ -404,6 +404,21 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   50% { box-shadow: 0 0 0 4px rgba(239,68,68,.15); }
 }
 .gantt-task .task-label { overflow: hidden; text-overflow: ellipsis; }
+.inactive-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(148,163,184,.1),
+    rgba(148,163,184,.1) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+  pointer-events: none;
+  z-index: 1;
+  border-left: 2px dashed #94a3b8;
+}
 .overlap-stripe {
   position: absolute;
   top: 0;
@@ -940,6 +955,14 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
         <label>身份</label>
         <select id="personEditRole"></select>
       </div>
+      <div class="form-group">
+        <label>入職日期</label>
+        <input type="date" id="personEditHire">
+      </div>
+      <div class="form-group">
+        <label>離職日期 <span style="font-weight:400;color:var(--text-secondary)">（留空 = 在職中）</span></label>
+        <input type="date" id="personEditLeave">
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closePersonModal()">取消</button>
@@ -984,16 +1007,16 @@ const DEFAULT_STATE = {
     { id: 'p1', name: 'DMG - 合庫', color: '#3b82f6' },
   ],
   people: [
-    { id: 'm1', name: 'Jonathan', role: '實習生' },
-    { id: 'm2', name: 'Maggie', role: '實習生' },
-    { id: 'm3', name: 'Steff', role: '實習生' },
-    { id: 'm4', name: 'Ellen', role: '正職' },
-    { id: 'm5', name: 'Gina', role: '正職' },
-    { id: 'm6', name: 'Bennett', role: '實習生' },
-    { id: 'm7', name: 'Vicky', role: '正職' },
-    { id: 'm8', name: 'Astrid', role: '正職' },
-    { id: 'm9', name: 'Mina', role: '正職' },
-    { id: 'm10', name: 'Jane', role: '正職' },
+    { id: 'm1', name: 'Jonathan', role: '實習生', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm2', name: 'Maggie', role: '實習生', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm3', name: 'Steff', role: '實習生', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm4', name: 'Ellen', role: '正職', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm5', name: 'Gina', role: '正職', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm6', name: 'Bennett', role: '實習生', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm7', name: 'Vicky', role: '正職', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm8', name: 'Astrid', role: '正職', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm9', name: 'Mina', role: '正職', hireDate: '2026-01-01', leaveDate: null },
+    { id: 'm10', name: 'Jane', role: '正職', hireDate: '2026-01-01', leaveDate: null },
   ],
   roles: [
     { name: '正職', color: '#f59e0b' },
@@ -1059,6 +1082,10 @@ function migrateState(s) {
   } else if (s.roles.length > 0 && typeof s.roles[0] === 'string') {
     s.roles = s.roles.map((r, i) => ({ name: r, color: ROLE_PALETTE[i % ROLE_PALETTE.length] }));
   }
+  s.people.forEach(p => {
+    if (!p.hireDate) p.hireDate = '2026-01-01';
+    if (p.leaveDate === undefined) p.leaveDate = null;
+  });
 }
 
 function loadStateLocal() {
@@ -1362,6 +1389,8 @@ function addPerson() {
   document.getElementById('personModalTitle').textContent = '新增成員';
   document.getElementById('personEditId').value = '';
   document.getElementById('personEditName').value = '';
+  document.getElementById('personEditHire').value = formatDate(new Date());
+  document.getElementById('personEditLeave').value = '';
   populateRoleDropdown('');
   document.getElementById('personModalOverlay').classList.add('open');
   setTimeout(() => document.getElementById('personEditName').focus(), 100);
@@ -1373,6 +1402,8 @@ function openPersonModal(personId) {
   document.getElementById('personModalTitle').textContent = '編輯成員';
   document.getElementById('personEditId').value = p.id;
   document.getElementById('personEditName').value = p.name;
+  document.getElementById('personEditHire').value = p.hireDate || '2026-01-01';
+  document.getElementById('personEditLeave').value = p.leaveDate || '';
   populateRoleDropdown(p.role || '');
   document.getElementById('personModalOverlay').classList.add('open');
   setTimeout(() => document.getElementById('personEditName').focus(), 100);
@@ -1393,13 +1424,15 @@ function savePersonEdit() {
   const id = document.getElementById('personEditId').value;
   const name = document.getElementById('personEditName').value.trim();
   const role = document.getElementById('personEditRole').value;
+  const hireDate = document.getElementById('personEditHire').value || '2026-01-01';
+  const leaveDate = document.getElementById('personEditLeave').value || null;
   if (!name) return alert('請輸入名稱');
   if (id) {
     const p = state.people.find(x => x.id === id);
-    if (p) { p.name = name; p.role = role; }
+    if (p) { p.name = name; p.role = role; p.hireDate = hireDate; p.leaveDate = leaveDate; }
   } else {
     const newId = 'm' + Date.now().toString(36);
-    state.people.push({ id: newId, name, role });
+    state.people.push({ id: newId, name, role, hireDate, leaveDate });
   }
   closePersonModal();
   render();
@@ -1608,7 +1641,7 @@ function renderSidebar(overlapMap, overlapPeriods) {
       ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
       <span class="drag-handle">⋮⋮</span>
       <div class="person-avatar" style="background:${rc}">${p.name[0]}</div>
-      <div class="person-info" onclick="event.stopPropagation();openPersonModal('${p.id}')" style="cursor:pointer"><div class="person-name">${p.name} <span style="font-size:.65rem;opacity:.5">✎</span></div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務</div></div>
+      <div class="person-info" onclick="event.stopPropagation();openPersonModal('${p.id}')" style="cursor:pointer"><div class="person-name">${p.name} <span style="font-size:.65rem;opacity:.5">✎</span></div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務${p.leaveDate ? ' · 離職 '+shortDate(p.leaveDate) : ''}</div></div>
       ${olc ? `<span class="person-overload">${olc} 重疊</span>` : ''}
       <button class="btn-sm" onclick="event.stopPropagation();removePerson('${p.id}')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:.85rem;font-weight:700;padding:2px 4px;opacity:.7;transition:opacity .15s" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.7">&times;</button>
     </div>`;
@@ -1673,6 +1706,14 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap
       const si = dayIndex[o.overlapStart], ei = dayIndex[o.overlapEnd];
       if (si!==undefined&&ei!==undefined) html += `<div class="overlap-stripe" style="left:${si*dayWidth}px;width:${(ei-si+1)*dayWidth}px"></div>`;
     });
+    if (person.leaveDate) {
+      const lvDate = parseDate(person.leaveDate);
+      const dayAfter = addDays(lvDate, 1);
+      const lvIdx = dayIndex[formatDate(dayAfter)];
+      if (lvIdx !== undefined) {
+        html += `<div class="inactive-zone" style="left:${lvIdx*dayWidth}px;width:${totalWidth - lvIdx*dayWidth}px"></div>`;
+      }
+    }
     pTasks.forEach(t => {
       const tS = parseDate(t.start), tE = parseDate(t.end); const proj = state.projects.find(p => p.id===t.projectId);
       let si, ei;
@@ -1723,6 +1764,10 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMa
       const right = dateToPx(addDays(oE, 1), timeStart, timeEnd, totalWidth);
       if (right > left) html += `<div class="overlap-stripe" style="left:${left}px;width:${right - left}px"></div>`;
     });
+    if (person.leaveDate) {
+      const lvLeft = dateToPx(addDays(parseDate(person.leaveDate), 1), timeStart, timeEnd, totalWidth);
+      if (lvLeft < totalWidth) html += `<div class="inactive-zone" style="left:${lvLeft}px;width:${totalWidth - lvLeft}px"></div>`;
+    }
 
     pTasks.forEach(t => {
       const tS = parseDate(t.start), tE = parseDate(t.end);
@@ -1795,6 +1840,10 @@ function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPe
       const right = dateToPx(addDays(oE, 1), timeStart, timeEnd, totalWidth);
       if (right > left) html += `<div class="overlap-stripe" style="left:${left}px;width:${right - left}px"></div>`;
     });
+    if (person.leaveDate) {
+      const lvLeft = dateToPx(addDays(parseDate(person.leaveDate), 1), timeStart, timeEnd, totalWidth);
+      if (lvLeft < totalWidth) html += `<div class="inactive-zone" style="left:${lvLeft}px;width:${totalWidth - lvLeft}px"></div>`;
+    }
 
     pTasks.forEach(t => {
       const tS = parseDate(t.start), tE = parseDate(t.end);
@@ -2006,6 +2055,15 @@ function saveTask() {
   if (assigneeIds.length === 0) return alert('請至少選擇一位負責人');
   if (!start || !end) return alert('請選擇日期');
   if (parseDate(start) > parseDate(end)) return alert('結束日期不可早於開始日期');
+  const taskEnd = parseDate(end);
+  const warnings = [];
+  assigneeIds.forEach(aid => {
+    const p = state.people.find(x => x.id === aid);
+    if (p?.leaveDate && taskEnd > parseDate(p.leaveDate)) {
+      warnings.push(`${p.name} 的離職日為 ${p.leaveDate}，此任務結束於 ${end}`);
+    }
+  });
+  if (warnings.length > 0 && !confirm('⚠ 以下人員在任務期間已離職：\n\n' + warnings.join('\n') + '\n\n確定要繼續儲存嗎？')) return;
   if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, {name,projectId,assigneeIds,start,end}); }
   else { state.tasks.push({id:uid(),name,projectId,assigneeIds,start,end}); }
   closeModal(); render();
