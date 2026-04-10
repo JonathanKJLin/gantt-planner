@@ -284,7 +284,6 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  overflow: hidden;
   min-width: fit-content;
 }
 
@@ -292,7 +291,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 .gantt-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 15;
   background: var(--card);
   border-bottom: 2px solid var(--border);
 }
@@ -308,6 +307,9 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   font-weight: 600;
   color: var(--text-secondary);
   background: #fafbfc;
+  position: sticky;
+  left: 0;
+  z-index: 20;
 }
 .gantt-week-header {
   display: flex;
@@ -353,7 +355,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   background: #fafbfc;
   position: sticky;
   left: 0;
-  z-index: 5;
+  z-index: 6;
 }
 .gantt-row-label.has-overload { color: var(--danger); }
 .gantt-row-timeline {
