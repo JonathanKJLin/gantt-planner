@@ -1783,7 +1783,7 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
     alertsSection.style.display = '';
     alertsList.innerHTML = overloadedPeople.map(([pid, v]) => {
       const person = state.people.find(p => p.id === pid);
-      return `<div class="alert-item"><strong>${person?.name||'?'}</strong> 同時有 <strong>${v.max}</strong> 個任務重疊（超過 ${OVERLOAD_THRESHOLD} 個）</div>`;
+      return `<div class="alert-item"><strong>${person?.name||'?'}</strong> 同時有 <strong>${v.max}</strong> 個任務重疊</div>`;
     }).join('');
   } else { alertsSection.style.display = 'none'; }
 
