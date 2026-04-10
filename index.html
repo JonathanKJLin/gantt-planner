@@ -1219,8 +1219,12 @@ async function pruneHistory() {
   }
 }
 
+let isInitializing = true;
+
 function saveState() {
   localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+
+  if (isInitializing) return;
 
   if (!isSyncing) {
     isSyncing = true;
@@ -2499,6 +2503,7 @@ async function init() {
   document.getElementById('inputEnd').addEventListener('change', e => { state.endDate = e.target.value; render(); });
   setViewMode(state.viewMode || 'day');
   setPage(state.currentPage || 'gantt');
+  isInitializing = false;
   subscribeToRealtime();
 }
 init();
