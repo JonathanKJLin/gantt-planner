@@ -751,6 +751,7 @@ input[type="date"], select {
     <div class="btn-group">
       <button class="btn active" id="btnDayView" onclick="setViewMode('day')">日檢視</button>
       <button class="btn" id="btnWeekView" onclick="setViewMode('week')">週檢視</button>
+      <button class="btn" id="btnMonthView" onclick="setViewMode('month')">月檢視</button>
     </div>
     <label style="font-size:.8rem;display:flex;align-items:center;gap:4px;cursor:pointer;">
       <input type="checkbox" id="chkHideWeekend" onchange="render()"> 隱藏週末
@@ -1196,8 +1197,10 @@ function render() {
 
   if (state.viewMode === 'day') {
     renderDayGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, overlapPeriods);
-  } else {
+  } else if (state.viewMode === 'week') {
     renderWeekGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, overlapPeriods);
+  } else {
+    renderMonthGantt(timeStart, timeEnd, today, overlapMap, overlapPeriods);
   }
 
   if (state.currentPage === 'project') renderProjectView();
@@ -1337,6 +1340,84 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, overlapMap, ove
   });
   html += '</div>';
   document.getElementById('ganttContainer').innerHTML = html;
+}
+
+// ═══════════════════════════════════════
+// Rendering — Month Gantt
+// ═══════════════════════════════════════
+function generateMonths(start, end) {
+  const months = [];
+  let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cur <= end) {
+    const mEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+    months.push({ start: new Date(cur), end: mEnd, label: `${cur.getFullYear()}/${cur.getMonth()+1}月` });
+    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+  }
+  return months;
+}
+
+function renderMonthGantt(timeStart, timeEnd, today, overlapMap, overlapPeriods) {
+  const months = generateMonths(timeStart, timeEnd);
+  const monthWidth = 160;
+  const taskHeight = 24;
+  const taskGap = 2;
+  const totalWidth = months.length * monthWidth;
+
+  let html = '<div class="gantt-header"><div class="gantt-header-row">';
+  html += '<div class="gantt-corner" style="height:36px">成員 / 月</div>';
+  months.forEach(m => {
+    html += `<div class="gantt-week-header" style="width:${monthWidth}px;font-size:.8rem">${m.label}</div>`;
+  });
+  html += '</div></div><div class="gantt-body">';
+
+  state.people.forEach(person => {
+    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
+    const { laneMap, laneCount } = assignLanes(pTasks);
+    const rowH = Math.max(40, laneCount * (taskHeight + taskGap) + 8);
+    const hasOL = pTasks.some(t => overlapMap[t.id]);
+
+    html += `<div class="gantt-row" style="height:${rowH}px">`;
+    html += `<div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div>`;
+    html += `<div class="gantt-row-timeline" style="width:${totalWidth}px;height:${rowH}px">`;
+
+    months.forEach((m, i) => {
+      html += `<div class="gantt-grid-line week-border" style="left:${i * monthWidth}px"></div>`;
+    });
+
+    overlapPeriods.filter(o => o.personId === person.id).forEach(o => {
+      const oS = parseDate(o.overlapStart), oE = parseDate(o.overlapEnd);
+      const left = dateToPx(oS, timeStart, timeEnd, totalWidth);
+      const right = dateToPx(addDays(oE, 1), timeStart, timeEnd, totalWidth);
+      if (right > left) html += `<div class="overlap-stripe" style="left:${left}px;width:${right - left}px"></div>`;
+    });
+
+    pTasks.forEach(t => {
+      const tS = parseDate(t.start), tE = parseDate(t.end);
+      const proj = state.projects.find(p => p.id === t.projectId);
+      const left = dateToPx(tS, timeStart, timeEnd, totalWidth);
+      const right = dateToPx(addDays(tE, 1), timeStart, timeEnd, totalWidth);
+      const width = Math.max(right - left, 4);
+      const lane = laneMap[t.id] || 0;
+      const top = 4 + lane * (taskHeight + taskGap);
+      const ol = overlapMap[t.id];
+
+      html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;height:${taskHeight}px;background:${proj?.color||'#999'};font-size:.68rem"
+        onclick="openTaskModal('${t.id}')"
+        onmouseenter="showTooltip(event,'${t.id}')"
+        onmousemove="moveTooltip(event)"
+        onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
+    });
+
+    html += '</div></div>';
+  });
+  html += '</div>';
+  document.getElementById('ganttContainer').innerHTML = html;
+}
+
+function dateToPx(date, rangeStart, rangeEnd, totalPx) {
+  const totalDays = daysBetween(rangeStart, rangeEnd) + 1;
+  const offset = daysBetween(rangeStart, date);
+  return Math.round((offset / totalDays) * totalPx);
 }
 
 // ═══════════════════════════════════════
@@ -1537,6 +1618,7 @@ function setViewMode(mode) {
   state.viewMode = mode;
   document.getElementById('btnDayView').classList.toggle('active', mode === 'day');
   document.getElementById('btnWeekView').classList.toggle('active', mode === 'week');
+  document.getElementById('btnMonthView').classList.toggle('active', mode === 'month');
   render();
 }
 function syncDateInputs() {
