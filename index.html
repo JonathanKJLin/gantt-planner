@@ -1175,7 +1175,7 @@ async function loadState() {
 }
 
 let lastSnapshotTime = 0;
-const SNAPSHOT_INTERVAL = 30000;
+const SNAPSHOT_INTERVAL = 120000;
 
 async function pushToSupabase() {
   const stateToSave = { ...state };
@@ -1314,18 +1314,31 @@ function isAssignedTo(t, personId) { return getAssigneeIds(t).includes(personId)
 // ═══════════════════════════════════════
 // Overlap Detection
 // ═══════════════════════════════════════
+const OVERLOAD_THRESHOLD = 3;
+
 function detectOverlaps() {
-  const overlapMap = {};      // taskId -> Set (for global "has any overlap" check)
-  const personOverlapMap = {}; // "personId:taskId" -> true (per-person overlap)
+  const overlapMap = {};
+  const personOverlapMap = {};
   const overlapPeriods = [];
+  const personOverloaded = {};
   const personTasks = {};
+
   state.tasks.forEach(t => {
     getAssigneeIds(t).forEach(pid => {
       if (!personTasks[pid]) personTasks[pid] = [];
       personTasks[pid].push(t);
     });
   });
+
   for (const [personId, tasks] of Object.entries(personTasks)) {
+    const maxConcurrent = getMaxConcurrent(tasks);
+    const isOverloaded = maxConcurrent > OVERLOAD_THRESHOLD;
+    personOverloaded[personId] = { max: maxConcurrent, overloaded: isOverloaded };
+
+    if (!isOverloaded) continue;
+
+    const overloadedDays = findOverloadDays(tasks, OVERLOAD_THRESHOLD);
+
     for (let i = 0; i < tasks.length; i++) {
       for (let j = i + 1; j < tasks.length; j++) {
         const a = tasks[i], b = tasks[j];
@@ -1334,19 +1347,61 @@ function detectOverlaps() {
         if (aStart <= bEnd && bStart <= aEnd) {
           const oStart = aStart > bStart ? aStart : bStart;
           const oEnd = aEnd < bEnd ? aEnd : bEnd;
-          overlapPeriods.push({ personId, task1: a, task2: b, overlapStart: formatDate(oStart), overlapEnd: formatDate(oEnd) });
-          if (!overlapMap[a.id]) overlapMap[a.id] = new Set();
-          if (!overlapMap[b.id]) overlapMap[b.id] = new Set();
-          overlapMap[a.id].add(b.id);
-          overlapMap[b.id].add(a.id);
-          personOverlapMap[personId + ':' + a.id] = true;
-          personOverlapMap[personId + ':' + b.id] = true;
+          if (hasOverloadInRange(overloadedDays, oStart, oEnd)) {
+            overlapPeriods.push({ personId, task1: a, task2: b, overlapStart: formatDate(oStart), overlapEnd: formatDate(oEnd) });
+            if (!overlapMap[a.id]) overlapMap[a.id] = new Set();
+            if (!overlapMap[b.id]) overlapMap[b.id] = new Set();
+            overlapMap[a.id].add(b.id);
+            overlapMap[b.id].add(a.id);
+            personOverlapMap[personId + ':' + a.id] = true;
+            personOverlapMap[personId + ':' + b.id] = true;
+          }
         }
       }
     }
   }
-  return { overlapMap, personOverlapMap, overlapPeriods };
+  return { overlapMap, personOverlapMap, overlapPeriods, personOverloaded };
 }
+
+function getMaxConcurrent(tasks) {
+  if (tasks.length <= OVERLOAD_THRESHOLD) return tasks.length;
+  const events = [];
+  tasks.forEach(t => {
+    events.push({ d: parseDate(t.start).getTime(), v: 1 });
+    events.push({ d: addDays(parseDate(t.end), 1).getTime(), v: -1 });
+  });
+  events.sort((a, b) => a.d - b.d || a.v - b.v);
+  let cur = 0, max = 0;
+  events.forEach(e => { cur += e.v; if (cur > max) max = cur; });
+  return max;
+}
+
+function findOverloadDays(tasks, threshold) {
+  const events = [];
+  tasks.forEach(t => {
+    events.push({ d: parseDate(t.start).getTime(), v: 1 });
+    events.push({ d: addDays(parseDate(t.end), 1).getTime(), v: -1 });
+  });
+  events.sort((a, b) => a.d - b.d || a.v - b.v);
+  const ranges = [];
+  let cur = 0, rangeStart = null;
+  events.forEach(e => {
+    const prev = cur;
+    cur += e.v;
+    if (cur > threshold && prev <= threshold) rangeStart = e.d;
+    if (cur <= threshold && prev > threshold && rangeStart !== null) {
+      ranges.push([rangeStart, e.d]);
+      rangeStart = null;
+    }
+  });
+  return ranges;
+}
+
+function hasOverloadInRange(overloadDays, start, end) {
+  const s = start.getTime(), e = end.getTime();
+  return overloadDays.some(([rs, re]) => s < re && e >= rs);
+}
+
 function isOverlapForPerson(personOverlapMap, personId, taskId) {
   return !!personOverlapMap[personId + ':' + taskId];
 }
@@ -1659,13 +1714,13 @@ function setPage(page) {
 // ═══════════════════════════════════════
 function render() {
   saveState();
-  const { overlapMap, personOverlapMap, overlapPeriods } = detectOverlaps();
+  const { overlapMap, personOverlapMap, overlapPeriods, personOverloaded } = detectOverlaps();
   const hideWeekend = document.getElementById('chkHideWeekend').checked;
   const timeStart = parseDate(state.startDate);
   const timeEnd = parseDate(state.endDate);
   const today = new Date(); today.setHours(0,0,0,0);
 
-  renderSidebar(overlapMap, overlapPeriods);
+  renderSidebar(overlapMap, overlapPeriods, personOverloaded);
 
   if (state.viewMode === 'day') {
     renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap, overlapPeriods);
@@ -1681,7 +1736,7 @@ function render() {
 // ═══════════════════════════════════════
 // Rendering — Sidebar
 // ═══════════════════════════════════════
-function renderSidebar(overlapMap, overlapPeriods) {
+function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
   renderRoleList();
   document.getElementById('projectLegend').innerHTML = state.projects.map(p =>
     `<div class="project-legend" style="cursor:pointer" onclick="openProjectModal('${p.id}')">
@@ -1691,31 +1746,30 @@ function renderSidebar(overlapMap, overlapPeriods) {
     </div>`
   ).join('');
 
-  const personOverloads = {};
-  overlapPeriods.forEach(o => { personOverloads[o.personId] = (personOverloads[o.personId]||0) + 1; });
-
   document.getElementById('peopleCount').textContent = state.people.length;
   document.getElementById('peopleList').innerHTML = state.people.map(p => {
     const taskCount = state.tasks.filter(t => isAssignedTo(t, p.id)).length;
-    const olc = personOverloads[p.id] || 0;
+    const po = personOverloaded[p.id];
+    const isOL = po?.overloaded;
     const rc = getRoleColor(p);
     return `<div class="person-item" draggable="true" data-drag-id="${p.id}" data-drag-type="person"
       ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
       <span class="drag-handle">⋮⋮</span>
       <div class="person-avatar" style="background:${rc}">${p.name[0]}</div>
       <div class="person-info" onclick="event.stopPropagation();openPersonModal('${p.id}')" style="cursor:pointer"><div class="person-name">${p.name} <span style="font-size:.65rem;opacity:.5">✎</span></div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務${p.leaveDate ? ' · 離職 '+shortDate(p.leaveDate) : ''}</div></div>
-      ${olc ? `<span class="person-overload">${olc} 重疊</span>` : ''}
+      ${isOL ? `<span class="person-overload">超載 (${po.max})</span>` : ''}
       <button class="btn-sm" onclick="event.stopPropagation();removePerson('${p.id}')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:.85rem;font-weight:700;padding:2px 4px;opacity:.7;transition:opacity .15s" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.7">&times;</button>
     </div>`;
   }).join('');
 
   const alertsSection = document.getElementById('alertsSection');
   const alertsList = document.getElementById('alertsList');
-  if (overlapPeriods.length > 0) {
+  const overloadedPeople = Object.entries(personOverloaded).filter(([,v]) => v.overloaded);
+  if (overloadedPeople.length > 0) {
     alertsSection.style.display = '';
-    alertsList.innerHTML = overlapPeriods.map(o => {
-      const person = state.people.find(p => p.id === o.personId);
-      return `<div class="alert-item"><strong>${person?.name||'?'}</strong>：「${o.task1.name}」與「${o.task2.name}」在 <strong>${o.overlapStart} ~ ${o.overlapEnd}</strong> 重疊</div>`;
+    alertsList.innerHTML = overloadedPeople.map(([pid, v]) => {
+      const person = state.people.find(p => p.id === pid);
+      return `<div class="alert-item"><strong>${person?.name||'?'}</strong> 同時有 <strong>${v.max}</strong> 個任務重疊（超過 ${OVERLOAD_THRESHOLD} 個）</div>`;
     }).join('');
   } else { alertsSection.style.display = 'none'; }
 
