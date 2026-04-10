@@ -187,6 +187,22 @@ input[type="date"], select {
   font-size: .85rem;
 }
 .person-item:hover { background: #f5f7fa; }
+
+/* Drag & drop */
+.drag-handle {
+  cursor: grab;
+  color: #c5ccd4;
+  font-size: .75rem;
+  user-select: none;
+  letter-spacing: 1px;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+.drag-handle:active { cursor: grabbing; }
+[draggable="true"] { transition: opacity .15s; }
+[draggable="true"].drag-over { box-shadow: 0 -2px 0 0 var(--accent) inset; }
+[draggable="true"].dragging { opacity: .4; }
+tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; }
 .person-avatar {
   width: 28px;
   height: 28px;
@@ -1287,6 +1303,59 @@ function removePerson(personId) {
   render();
 }
 
+// ═══════════════════════════════════════
+// Drag & Drop Reordering
+// ═══════════════════════════════════════
+let _dragId = null;
+let _dragType = null;
+
+function handleDragStart(e) {
+  const el = e.target.closest('[data-drag-id]');
+  if (!el) return;
+  _dragId = el.dataset.dragId;
+  _dragType = el.dataset.dragType;
+  e.dataTransfer.effectAllowed = 'move';
+  requestAnimationFrame(() => el.classList.add('dragging'));
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const el = e.target.closest('[data-drag-id]');
+  if (el && el.dataset.dragType === _dragType && el.dataset.dragId !== _dragId) {
+    el.classList.add('drag-over');
+  }
+}
+
+function handleDragLeave(e) {
+  const el = e.target.closest('[data-drag-id]');
+  if (el) el.classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  const el = e.target.closest('[data-drag-id]');
+  if (!el || !_dragId) return;
+  const targetId = el.dataset.dragId;
+  const targetType = el.dataset.dragType;
+  if (targetType !== _dragType || targetId === _dragId) return;
+
+  const arr = _dragType === 'person' ? state.people : state.tasks;
+  const fromIdx = arr.findIndex(x => x.id === _dragId);
+  const toIdx = arr.findIndex(x => x.id === targetId);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  const [item] = arr.splice(fromIdx, 1);
+  arr.splice(toIdx, 0, item);
+  render();
+}
+
+function handleDragEnd(e) {
+  document.querySelectorAll('.dragging,.drag-over').forEach(el => el.classList.remove('dragging', 'drag-over'));
+  _dragId = null;
+  _dragType = null;
+}
+
 function setPage(page) {
   state.currentPage = page;
   document.getElementById('tabGantt').classList.toggle('active', page === 'gantt');
@@ -1342,7 +1411,9 @@ function renderSidebar(overlapMap, overlapPeriods) {
     const taskCount = state.tasks.filter(t => isAssignedTo(t, p.id)).length;
     const olc = personOverloads[p.id] || 0;
     const hue = (parseInt(p.id.replace('m','')) * 37) % 360;
-    return `<div class="person-item">
+    return `<div class="person-item" draggable="true" data-drag-id="${p.id}" data-drag-type="person"
+      ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
+      <span class="drag-handle">⋮⋮</span>
       <div class="person-avatar" style="background:hsl(${hue},55%,55%)">${p.name[0]}</div>
       <div class="person-info"><div class="person-name">${p.name}</div><div class="person-tasks-count">${taskCount} 項任務</div></div>
       ${olc ? `<span class="person-overload">${olc} 重疊</span>` : ''}
@@ -1361,9 +1432,7 @@ function renderSidebar(overlapMap, overlapPeriods) {
   } else { alertsSection.style.display = 'none'; }
 
   document.getElementById('taskCount').textContent = state.tasks.length;
-  document.getElementById('taskList').innerHTML = state.tasks
-    .sort((a, b) => parseDate(a.start) - parseDate(b.start))
-    .map(t => {
+  document.getElementById('taskList').innerHTML = state.tasks.map(t => {
       const proj = state.projects.find(p => p.id === t.projectId);
       const hasOL = overlapMap[t.id];
       return `<div class="task-list-item" onclick="openTaskModal('${t.id}')">
@@ -1543,7 +1612,7 @@ function renderProjectView() {
 
   // Per-project sections
   state.projects.forEach(proj => {
-    const projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a,b) => parseDate(a.start)-parseDate(b.start));
+    const projTasks = state.tasks.filter(t => t.projectId === proj.id);
     const totalDays = projTasks.reduce((s,t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     const participantMap = {};
     projTasks.forEach(t => {
@@ -1574,8 +1643,9 @@ function renderProjectView() {
     projTasks.forEach(t => {
       const dur = taskDuration(t);
       const ol = overlapMap[t.id];
-      html += `<tr>
-        <td class="pv-task-name">${t.name}${ol ? '<span class="pv-overlap-badge">⚠ 重疊</span>' : ''}</td>
+      html += `<tr draggable="true" data-drag-id="${t.id}" data-drag-type="task"
+        ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
+        <td class="pv-task-name"><span class="drag-handle">⋮⋮</span> ${t.name}${ol ? '<span class="pv-overlap-badge">⚠ 重疊</span>' : ''}</td>
         <td>${getAssigneeNames(t)}</td>
         <td>${shortDate(t.start)}</td>
         <td>${shortDate(t.end)}</td>
