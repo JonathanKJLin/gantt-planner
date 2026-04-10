@@ -1196,6 +1196,7 @@ async function pushToSupabase() {
 }
 
 function scheduleSnapshot() {
+  saveState();
   const now = Date.now();
   if (now - lastSnapshotTime > SNAPSHOT_INTERVAL) {
     lastSnapshotTime = now;
@@ -1221,8 +1222,12 @@ async function pruneHistory() {
 
 let isInitializing = true;
 
-function saveState() {
+function saveStateLocal() {
   localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+}
+
+function saveState() {
+  saveStateLocal();
 
   if (isInitializing) return;
 
@@ -1714,7 +1719,7 @@ function setPage(page) {
   document.getElementById('pageGantt').classList.toggle('active', page === 'gantt');
   document.getElementById('pageProject').classList.toggle('active', page === 'project');
   document.getElementById('ganttControls').style.display = page === 'gantt' ? '' : 'none';
-  saveState();
+  saveStateLocal();
   if (page === 'project') renderProjectView();
 }
 
@@ -1722,7 +1727,7 @@ function setPage(page) {
 // Rendering — Main
 // ═══════════════════════════════════════
 function render() {
-  saveState();
+  saveStateLocal();
   const { overlapMap, personOverlapMap, overlapPeriods, personOverloaded } = detectOverlaps();
   const hideWeekend = document.getElementById('chkHideWeekend').checked;
   const timeStart = parseDate(state.startDate);
