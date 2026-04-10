@@ -225,6 +225,17 @@ input[type="date"], select {
   border-radius: 3px;
   flex-shrink: 0;
 }
+.project-name-editable {
+  cursor: text;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  outline: none;
+  transition: border-color .15s, background .15s;
+  min-width: 40px;
+}
+.project-name-editable:hover { border-color: var(--border); }
+.project-name-editable:focus { border-color: var(--accent); background: #eff6ff; }
 .alert-item {
   padding: 8px 10px;
   border-radius: 6px;
@@ -1151,6 +1162,14 @@ function assignLanes(tasks) {
 // ═══════════════════════════════════════
 // Page Navigation
 // ═══════════════════════════════════════
+function renameProject(pid, newName) {
+  const trimmed = newName.trim();
+  const proj = state.projects.find(p => p.id === pid);
+  if (!proj || !trimmed || proj.name === trimmed) return;
+  proj.name = trimmed;
+  render();
+}
+
 function setPage(page) {
   state.currentPage = page;
   document.getElementById('tabGantt').classList.toggle('active', page === 'gantt');
@@ -1189,7 +1208,14 @@ function render() {
 // ═══════════════════════════════════════
 function renderSidebar(overlapMap, overlapPeriods) {
   document.getElementById('projectLegend').innerHTML = state.projects.map(p =>
-    `<div class="project-legend"><div class="project-dot" style="background:${p.color}"></div><span>${p.name}</span></div>`
+    `<div class="project-legend">
+      <div class="project-dot" style="background:${p.color}"></div>
+      <span class="project-name-editable" contenteditable="true" spellcheck="false"
+        data-pid="${p.id}"
+        onblur="renameProject('${p.id}', this.textContent)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+      >${p.name}</span>
+    </div>`
   ).join('');
 
   const personOverloads = {};
