@@ -1768,9 +1768,16 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap
       const si = dayIndex[o.overlapStart], ei = dayIndex[o.overlapEnd];
       if (si!==undefined&&ei!==undefined) html += `<div class="overlap-stripe" style="left:${si*dayWidth}px;width:${(ei-si+1)*dayWidth}px"></div>`;
     });
+    if (person.hireDate) {
+      const hireIdx = dayIndex[person.hireDate];
+      if (hireIdx !== undefined && hireIdx > 0) {
+        html += `<div class="inactive-zone" style="left:0;width:${hireIdx*dayWidth}px;border-left:none;border-right:2px dashed #94a3b8"></div>`;
+      } else if (hireIdx === undefined && parseDate(person.hireDate) > timeEnd) {
+        html += `<div class="inactive-zone" style="left:0;width:${totalWidth}px;border-left:none"></div>`;
+      }
+    }
     if (person.leaveDate) {
-      const lvDate = parseDate(person.leaveDate);
-      const dayAfter = addDays(lvDate, 1);
+      const dayAfter = addDays(parseDate(person.leaveDate), 1);
       const lvIdx = dayIndex[formatDate(dayAfter)];
       if (lvIdx !== undefined) {
         html += `<div class="inactive-zone" style="left:${lvIdx*dayWidth}px;width:${totalWidth - lvIdx*dayWidth}px"></div>`;
@@ -1826,6 +1833,10 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMa
       const right = dateToPx(addDays(oE, 1), timeStart, timeEnd, totalWidth);
       if (right > left) html += `<div class="overlap-stripe" style="left:${left}px;width:${right - left}px"></div>`;
     });
+    if (person.hireDate) {
+      const hireLeft = dateToPx(parseDate(person.hireDate), timeStart, timeEnd, totalWidth);
+      if (hireLeft > 0) html += `<div class="inactive-zone" style="left:0;width:${hireLeft}px;border-left:none;border-right:2px dashed #94a3b8"></div>`;
+    }
     if (person.leaveDate) {
       const lvLeft = dateToPx(addDays(parseDate(person.leaveDate), 1), timeStart, timeEnd, totalWidth);
       if (lvLeft < totalWidth) html += `<div class="inactive-zone" style="left:${lvLeft}px;width:${totalWidth - lvLeft}px"></div>`;
@@ -1902,6 +1913,10 @@ function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPe
       const right = dateToPx(addDays(oE, 1), timeStart, timeEnd, totalWidth);
       if (right > left) html += `<div class="overlap-stripe" style="left:${left}px;width:${right - left}px"></div>`;
     });
+    if (person.hireDate) {
+      const hireLeft = dateToPx(parseDate(person.hireDate), timeStart, timeEnd, totalWidth);
+      if (hireLeft > 0) html += `<div class="inactive-zone" style="left:0;width:${hireLeft}px;border-left:none;border-right:2px dashed #94a3b8"></div>`;
+    }
     if (person.leaveDate) {
       const lvLeft = dateToPx(addDays(parseDate(person.leaveDate), 1), timeStart, timeEnd, totalWidth);
       if (lvLeft < totalWidth) html += `<div class="inactive-zone" style="left:${lvLeft}px;width:${totalWidth - lvLeft}px"></div>`;
@@ -2117,6 +2132,7 @@ function saveTask() {
   if (assigneeIds.length === 0) return alert('請至少選擇一位負責人');
   if (!start || !end) return alert('請選擇日期');
   if (parseDate(start) > parseDate(end)) return alert('結束日期不可早於開始日期');
+  const taskStart = parseDate(start);
   const taskEnd = parseDate(end);
   const warnings = [];
   assigneeIds.forEach(aid => {
@@ -2124,8 +2140,11 @@ function saveTask() {
     if (p?.leaveDate && taskEnd > parseDate(p.leaveDate)) {
       warnings.push(`${p.name} 的離職日為 ${p.leaveDate}，此任務結束於 ${end}`);
     }
+    if (p?.hireDate && taskStart < parseDate(p.hireDate)) {
+      warnings.push(`${p.name} 的入職日為 ${p.hireDate}，此任務開始於 ${start}`);
+    }
   });
-  if (warnings.length > 0 && !confirm('⚠ 以下人員在任務期間已離職：\n\n' + warnings.join('\n') + '\n\n確定要繼續儲存嗎？')) return;
+  if (warnings.length > 0 && !confirm('⚠ 以下人員在任務期間尚未入職或已離職：\n\n' + warnings.join('\n') + '\n\n確定要繼續儲存嗎？')) return;
   if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, {name,projectId,assigneeIds,start,end}); }
   else { state.tasks.push({id:uid(),name,projectId,assigneeIds,start,end}); }
   closeModal(); render();
