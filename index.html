@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Resource Gantt Planner — 多專案人力排程</title>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 :root {
   --bg: #f0f2f5;
@@ -698,6 +699,7 @@ input[type="date"], select {
     <button class="btn" onclick="importData()">匯入 JSON</button>
     <button class="btn" onclick="exportData()">匯出 JSON</button>
     <button class="btn" onclick="exportNotionCSV()" style="border-color:#a78bfa;color:#7c3aed">匯出 Notion CSV</button>
+    <button class="btn" onclick="exportExcel()" style="border-color:#16a34a;color:#16a34a">匯出 Excel</button>
     <button class="btn btn-primary" onclick="openTaskModal()">＋ 新增任務</button>
   </div>
 </div>
@@ -1396,6 +1398,113 @@ function csvEscape(val) {
 
 function closeNotionGuide() {
   document.getElementById('notionGuideOverlay').classList.remove('open');
+}
+
+// ═══════════════════════════════════════
+// Excel Export (via SheetJS)
+// ═══════════════════════════════════════
+function exportExcel() {
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: All Tasks ──
+  const allRows = state.tasks
+    .sort((a, b) => {
+      const pi = state.projects.findIndex(p => p.id === a.projectId) - state.projects.findIndex(p => p.id === b.projectId);
+      return pi !== 0 ? pi : parseDate(a.start) - parseDate(b.start);
+    })
+    .map(t => {
+      const proj = state.projects.find(p => p.id === t.projectId);
+      const person = state.people.find(p => p.id === t.assigneeId);
+      const { overlapMap } = detectOverlaps();
+      return {
+        '任務名稱': t.name,
+        '專案': proj?.name || '',
+        '負責人': person?.name || '',
+        '開始日期': parseDate(t.start),
+        '結束日期': parseDate(t.end),
+        '天數': taskDuration(t),
+        '重疊': overlapMap[t.id] ? '⚠ 是' : ''
+      };
+    });
+  const ws1 = XLSX.utils.json_to_sheet(allRows);
+  formatSheet(ws1, [22, 24, 10, 12, 12, 6, 8]);
+  formatDateCols(ws1, [3, 4], allRows.length);
+  XLSX.utils.book_append_sheet(wb, ws1, '全部任務');
+
+  // ── Sheet per project ──
+  state.projects.forEach(proj => {
+    const rows = state.tasks
+      .filter(t => t.projectId === proj.id)
+      .sort((a, b) => parseDate(a.start) - parseDate(b.start))
+      .map(t => {
+        const person = state.people.find(p => p.id === t.assigneeId);
+        return {
+          '任務名稱': t.name,
+          '負責人': person?.name || '',
+          '開始日期': parseDate(t.start),
+          '結束日期': parseDate(t.end),
+          '天數': taskDuration(t)
+        };
+      });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    formatSheet(ws, [22, 10, 12, 12, 6]);
+    formatDateCols(ws, [2, 3], rows.length);
+    const sheetName = proj.name.split('—')[0].trim();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  // ── Sheet: Cross-project matrix ──
+  const matrixRows = [];
+  state.people.forEach(person => {
+    const row = { '成員': person.name };
+    let total = 0;
+    let projCount = 0;
+    state.projects.forEach(proj => {
+      const days = state.tasks
+        .filter(t => t.assigneeId === person.id && t.projectId === proj.id)
+        .reduce((s, t) => s + taskDuration(t), 0);
+      const colName = proj.name.split('—')[0].trim();
+      row[colName] = days || '';
+      total += days;
+      if (days > 0) projCount++;
+    });
+    row['總天數'] = total;
+    row['參與專案數'] = projCount;
+    matrixRows.push(row);
+  });
+  const totalsRow = { '成員': '合計' };
+  let grand = 0;
+  state.projects.forEach(proj => {
+    const d = state.tasks.filter(t => t.projectId === proj.id).reduce((s, t) => s + taskDuration(t), 0);
+    totalsRow[proj.name.split('—')[0].trim()] = d;
+    grand += d;
+  });
+  totalsRow['總天數'] = grand;
+  totalsRow['參與專案數'] = '';
+  matrixRows.push(totalsRow);
+
+  const ws3 = XLSX.utils.json_to_sheet(matrixRows);
+  formatSheet(ws3, [10, 10, 10, 10, 8, 10]);
+  XLSX.utils.book_append_sheet(wb, ws3, '人力分配矩陣');
+
+  XLSX.writeFile(wb, `gantt-planner-${formatDate(new Date())}.xlsx`);
+}
+
+function formatSheet(ws, widths) {
+  ws['!cols'] = widths.map(w => ({ wch: w }));
+}
+
+function formatDateCols(ws, colIndices, rowCount) {
+  const fmt = 'yyyy/mm/dd';
+  for (let r = 1; r <= rowCount; r++) {
+    colIndices.forEach(c => {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (ws[addr] && ws[addr].t === 'd') {
+        ws[addr].t = 'd';
+        ws[addr].z = fmt;
+      }
+    });
+  }
 }
 
 function importData() { document.getElementById('fileInput').click(); }
