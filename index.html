@@ -1193,10 +1193,15 @@ async function pushToSupabase() {
     setSyncStatus('offline');
   }
   setTimeout(() => { ignoreNextRealtime = false; }, 500);
+}
 
+function scheduleSnapshot() {
   const now = Date.now();
   if (now - lastSnapshotTime > SNAPSHOT_INTERVAL) {
     lastSnapshotTime = now;
+    const stateToSave = { ...state };
+    delete stateToSave.currentPage;
+    delete stateToSave.viewMode;
     saveSnapshot(stateToSave);
   }
 }
@@ -1486,7 +1491,7 @@ function saveProject() {
     state.projects.push({ id: newId, name, color: selectedProjectColor });
   }
   closeProjectModal();
-  render();
+  render(); scheduleSnapshot();
 }
 function deleteProject() {
   const id = document.getElementById('projectEditId').value;
@@ -1496,7 +1501,7 @@ function deleteProject() {
   state.tasks = state.tasks.filter(t => t.projectId !== id);
   state.projects = state.projects.filter(p => p.id !== id);
   closeProjectModal();
-  render();
+  render(); scheduleSnapshot();
 }
 
 // ═══════════════════════════════════════
@@ -1552,7 +1557,7 @@ function savePersonEdit() {
     state.people.push({ id: newId, name, role, hireDate, leaveDate });
   }
   closePersonModal();
-  render();
+  render(); scheduleSnapshot();
 }
 
 function removePerson(personId) {
@@ -1566,7 +1571,7 @@ function removePerson(personId) {
     if (idx !== -1) ids.splice(idx, 1);
   });
   state.people = state.people.filter(p => p.id !== personId);
-  render();
+  render(); scheduleSnapshot();
 }
 
 // ═══════════════════════════════════════
@@ -1620,7 +1625,7 @@ function saveRole() {
     state.roles.push({ name, color: selectedRoleColor });
   }
   closeRoleModal();
-  render();
+  render(); scheduleSnapshot();
 }
 
 function deleteRole() {
@@ -1631,7 +1636,7 @@ function deleteRole() {
   if (!confirm(`確定要刪除「${roleName}」角色？目前有 ${count} 位成員使用此角色。`)) return;
   state.roles.splice(idx, 1);
   closeRoleModal();
-  render();
+  render(); scheduleSnapshot();
 }
 
 function renderRoleList() {
@@ -1689,7 +1694,7 @@ function handleDrop(e) {
 
   const [item] = arr.splice(fromIdx, 1);
   arr.splice(toIdx, 0, item);
-  render();
+  render(); scheduleSnapshot();
 }
 
 function handleDragEnd(e) {
@@ -2201,13 +2206,13 @@ function saveTask() {
   if (warnings.length > 0 && !confirm('⚠ 以下人員在任務期間尚未入職或已離職：\n\n' + warnings.join('\n') + '\n\n確定要繼續儲存嗎？')) return;
   if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, {name,projectId,assigneeIds,start,end}); }
   else { state.tasks.push({id:uid(),name,projectId,assigneeIds,start,end}); }
-  closeModal(); render();
+  closeModal(); render(); scheduleSnapshot();
 }
 function deleteTask() {
   const id = document.getElementById('taskId').value; if (!id) return;
   if (!confirm('確定要刪除此任務？')) return;
   state.tasks = state.tasks.filter(t => t.id !== id);
-  closeModal(); render();
+  closeModal(); render(); scheduleSnapshot();
 }
 
 // ═══════════════════════════════════════
@@ -2478,7 +2483,7 @@ function handleImport(e) {
       const data = JSON.parse(evt.target.result);
       if (!data.projects||!data.people||!data.tasks) throw new Error('Invalid format');
       migrateState(data);
-      state = data; saveState(); syncDateInputs(); render(); alert('匯入成功！');
+      state = data; saveState(); syncDateInputs(); render(); scheduleSnapshot(); alert('匯入成功！');
     } catch (err) { alert('匯入失敗：'+err.message); }
   };
   reader.readAsText(file); e.target.value = '';
