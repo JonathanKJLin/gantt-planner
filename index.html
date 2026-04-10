@@ -1175,7 +1175,7 @@ async function loadState() {
 }
 
 let lastSnapshotTime = 0;
-const SNAPSHOT_INTERVAL = 120000;
+const SNAPSHOT_INTERVAL = 5000;
 
 async function pushToSupabase() {
   const stateToSave = { ...state };
