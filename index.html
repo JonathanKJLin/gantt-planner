@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Resource Gantt Planner — 多專案人力排程</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root {
   --bg: #f0f2f5;
@@ -82,6 +83,30 @@ body {
 
 .topbar-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+
+/* Sync indicator */
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .75rem;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+.sync-badge .sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.sync-badge.connected { background: #ecfdf5; color: #059669; }
+.sync-badge.connected .sync-dot { background: #10b981; }
+.sync-badge.syncing { background: #eff6ff; color: #2563eb; }
+.sync-badge.syncing .sync-dot { background: #3b82f6; animation: pulse-dot 1s infinite; }
+.sync-badge.offline { background: #fef2f2; color: #dc2626; }
+.sync-badge.offline .sync-dot { background: #ef4444; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 
 /* ── Buttons ── */
 .btn {
@@ -696,6 +721,7 @@ input[type="date"], select {
     </label>
   </div>
   <div class="topbar-right">
+    <div class="sync-badge offline" id="syncBadge"><span class="sync-dot"></span><span id="syncText">離線</span></div>
     <button class="btn" onclick="importData()">匯入 JSON</button>
     <button class="btn" onclick="exportData()">匯出 JSON</button>
     <button class="btn" onclick="exportNotionCSV()" style="border-color:#a78bfa;color:#7c3aed">匯出 Notion CSV</button>
@@ -857,22 +883,119 @@ const DEFAULT_STATE = {
 
 let state;
 
-function loadState() {
+// ═══════════════════════════════════════
+// Supabase Setup
+// ═══════════════════════════════════════
+const SUPABASE_URL = 'https://geerhvkkgnxansiohifq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlZXJodmtrZ254YW5zaW9oaWZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MDc3MjQsImV4cCI6MjA5MTM4MzcyNH0.TjpbXSPqXySfZUpaySIP8FdazNWyTp3ovR_34qazqS8';
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let isSyncing = false;
+let ignoreNextRealtime = false;
+
+function setSyncStatus(status) {
+  const badge = document.getElementById('syncBadge');
+  const text = document.getElementById('syncText');
+  badge.className = 'sync-badge ' + status;
+  const labels = { connected: '已同步', syncing: '同步中...', offline: '離線' };
+  text.textContent = labels[status] || status;
+}
+
+function loadStateLocal() {
   try {
     const saved = localStorage.getItem('gantt-planner-state');
     if (saved) {
-      state = JSON.parse(saved);
-      if (!state.projects || !state.people || !state.tasks) throw new Error();
+      const parsed = JSON.parse(saved);
+      if (parsed.projects && parsed.people && parsed.tasks) return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+async function loadState() {
+  const local = loadStateLocal();
+  state = local || JSON.parse(JSON.stringify(DEFAULT_STATE));
+
+  try {
+    const { data, error } = await sb
+      .from('gantt_state')
+      .select('data')
+      .eq('id', 1)
+      .single();
+
+    if (error) throw error;
+
+    if (data?.data && data.data.tasks && data.data.tasks.length > 0) {
+      state = data.data;
+      localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+      setSyncStatus('connected');
+    } else if (local && local.tasks && local.tasks.length > 0) {
+      await pushToSupabase();
+      setSyncStatus('connected');
     } else {
       state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+      await pushToSupabase();
+      setSyncStatus('connected');
     }
-  } catch {
-    state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  } catch (err) {
+    console.warn('Supabase load failed, using local data:', err.message);
+    setSyncStatus('offline');
   }
+}
+
+async function pushToSupabase() {
+  const stateToSave = { ...state };
+  delete stateToSave.currentPage;
+  delete stateToSave.viewMode;
+
+  ignoreNextRealtime = true;
+  const { error } = await sb
+    .from('gantt_state')
+    .update({ data: stateToSave, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+
+  if (error) {
+    console.warn('Supabase save failed:', error.message);
+    setSyncStatus('offline');
+  }
+  setTimeout(() => { ignoreNextRealtime = false; }, 500);
 }
 
 function saveState() {
   localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+
+  if (!isSyncing) {
+    isSyncing = true;
+    setSyncStatus('syncing');
+    pushToSupabase().then(() => {
+      setSyncStatus('connected');
+    }).catch(() => {
+      setSyncStatus('offline');
+    }).finally(() => {
+      isSyncing = false;
+    });
+  }
+}
+
+function subscribeToRealtime() {
+  sb
+    .channel('gantt-sync')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'gantt_state' }, (payload) => {
+      if (ignoreNextRealtime) return;
+      const remote = payload.new?.data;
+      if (remote && remote.tasks) {
+        const localPage = state.currentPage;
+        const localView = state.viewMode;
+        state = { ...remote, currentPage: localPage, viewMode: localView };
+        localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+        syncDateInputs();
+        render();
+        setSyncStatus('connected');
+      }
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') setSyncStatus('connected');
+    });
 }
 
 // ═══════════════════════════════════════
@@ -1524,13 +1647,14 @@ function handleImport(e) {
 // ═══════════════════════════════════════
 // Init
 // ═══════════════════════════════════════
-function init() {
-  loadState();
+async function init() {
+  await loadState();
   syncDateInputs();
   document.getElementById('inputStart').addEventListener('change', e => { state.startDate = e.target.value; render(); });
   document.getElementById('inputEnd').addEventListener('change', e => { state.endDate = e.target.value; render(); });
   setViewMode(state.viewMode || 'day');
   setPage(state.currentPage || 'gantt');
+  subscribeToRealtime();
 }
 init();
 </script>
