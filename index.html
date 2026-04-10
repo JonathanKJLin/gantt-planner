@@ -406,6 +406,22 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   50% { box-shadow: 0 0 0 4px rgba(239,68,68,.15); }
 }
 .gantt-task .task-label { overflow: hidden; text-overflow: ellipsis; }
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin-bottom: 6px;
+  font-size: .85rem;
+  transition: background .1s;
+}
+.history-item:hover { background: #f5f7fa; }
+.history-item .hi-time { font-weight: 600; min-width: 130px; }
+.history-item .hi-meta { flex: 1; color: var(--text-secondary); font-size: .78rem; }
+.history-item .hi-label { font-size: .75rem; color: var(--accent); font-weight: 500; background: #eff6ff; padding: 1px 8px; border-radius: 10px; }
+.history-item .hi-actions { display: flex; gap: 4px; }
 .inactive-zone {
   position: absolute;
   top: 0;
@@ -802,6 +818,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   </div>
   <div class="topbar-right">
     <div class="sync-badge offline" id="syncBadge"><span class="sync-dot"></span><span id="syncText">離線</span></div>
+    <button class="btn" onclick="openHistoryModal()">版本歷史</button>
     <button class="btn" onclick="importData()">匯入 JSON</button>
     <button class="btn" onclick="exportData()">匯出 JSON</button>
     <button class="btn" onclick="exportNotionCSV()" style="border-color:#a78bfa;color:#7c3aed">匯出 Notion CSV</button>
@@ -910,6 +927,27 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
       <button class="btn" onclick="closeProjectModal()">取消</button>
       <button class="btn btn-danger" id="btnDeleteProject" onclick="deleteProject()" style="display:none">刪除</button>
       <button class="btn btn-primary" onclick="saveProject()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- History Modal -->
+<div class="modal-overlay" id="historyModalOverlay" onclick="if(event.target===this)closeHistoryModal()">
+  <div class="modal" style="width:600px">
+    <div class="modal-header">
+      <h2>版本歷史</h2>
+      <button class="modal-close" onclick="closeHistoryModal()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:12px 24px">
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input type="text" id="snapshotLabel" placeholder="輸入快照名稱（例：週會前定版）" style="flex:1">
+        <button class="btn btn-primary" onclick="createNamedSnapshot()">建立快照</button>
+      </div>
+      <div id="historyList" style="max-height:400px;overflow-y:auto"></div>
+      <div id="historyLoading" style="text-align:center;padding:20px;color:var(--text-secondary)">載入中...</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeHistoryModal()">關閉</button>
     </div>
   </div>
 </div>
@@ -1136,6 +1174,9 @@ async function loadState() {
   }
 }
 
+let lastSnapshotTime = 0;
+const SNAPSHOT_INTERVAL = 30000;
+
 async function pushToSupabase() {
   const stateToSave = { ...state };
   delete stateToSave.currentPage;
@@ -1152,6 +1193,25 @@ async function pushToSupabase() {
     setSyncStatus('offline');
   }
   setTimeout(() => { ignoreNextRealtime = false; }, 500);
+
+  const now = Date.now();
+  if (now - lastSnapshotTime > SNAPSHOT_INTERVAL) {
+    lastSnapshotTime = now;
+    saveSnapshot(stateToSave);
+  }
+}
+
+async function saveSnapshot(data, label) {
+  await sb.from('gantt_history').insert({ data, label: label || null });
+  pruneHistory();
+}
+
+async function pruneHistory() {
+  const { data } = await sb.from('gantt_history').select('id').order('saved_at', { ascending: false }).range(100, 9999);
+  if (data && data.length > 0) {
+    const ids = data.map(r => r.id);
+    await sb.from('gantt_history').delete().in('id', ids);
+  }
 }
 
 function saveState() {
@@ -2145,6 +2205,86 @@ function csvEscape(val) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
+}
+
+// ═══════════════════════════════════════
+// Version History
+// ═══════════════════════════════════════
+async function openHistoryModal() {
+  document.getElementById('historyModalOverlay').classList.add('open');
+  document.getElementById('historyList').innerHTML = '';
+  document.getElementById('historyLoading').style.display = '';
+  document.getElementById('snapshotLabel').value = '';
+
+  const { data, error } = await sb
+    .from('gantt_history')
+    .select('id, saved_at, label, data')
+    .order('saved_at', { ascending: false })
+    .limit(50);
+
+  document.getElementById('historyLoading').style.display = 'none';
+
+  if (error || !data) {
+    document.getElementById('historyList').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary)">無法載入版本歷史</div>';
+    return;
+  }
+
+  if (data.length === 0) {
+    document.getElementById('historyList').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary)">尚無歷史版本。編輯後會自動產生快照。</div>';
+    return;
+  }
+
+  document.getElementById('historyList').innerHTML = data.map(h => {
+    const d = new Date(h.saved_at);
+    const timeStr = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    const tasks = h.data?.tasks?.length || 0;
+    const people = h.data?.people?.length || 0;
+    return `<div class="history-item">
+      <div class="hi-time">${timeStr}</div>
+      <div class="hi-meta">${tasks} 任務 · ${people} 人${h.label ? ` <span class="hi-label">${h.label}</span>` : ''}</div>
+      <div class="hi-actions">
+        <button class="btn btn-sm" onclick="restoreVersion(${h.id})">還原</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function closeHistoryModal() {
+  document.getElementById('historyModalOverlay').classList.remove('open');
+}
+
+async function createNamedSnapshot() {
+  const label = document.getElementById('snapshotLabel').value.trim();
+  if (!label) return alert('請輸入快照名稱');
+  const stateToSave = { ...state };
+  delete stateToSave.currentPage;
+  delete stateToSave.viewMode;
+  await saveSnapshot(stateToSave, label);
+  document.getElementById('snapshotLabel').value = '';
+  openHistoryModal();
+}
+
+async function restoreVersion(historyId) {
+  if (!confirm('確定要還原到此版本？目前的資料會被覆蓋（但會先自動建立一個快照）。')) return;
+
+  const stateToSave = { ...state };
+  delete stateToSave.currentPage;
+  delete stateToSave.viewMode;
+  await saveSnapshot(stateToSave, '還原前自動備份');
+
+  const { data, error } = await sb.from('gantt_history').select('data').eq('id', historyId).single();
+  if (error || !data?.data) return alert('還原失敗');
+
+  const localPage = state.currentPage;
+  const localView = state.viewMode;
+  state = { ...data.data, currentPage: localPage, viewMode: localView };
+  migrateState(state);
+  localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+  await pushToSupabase();
+  syncDateInputs();
+  render();
+  closeHistoryModal();
+  setSyncStatus('connected');
 }
 
 function closeNotionGuide() {
