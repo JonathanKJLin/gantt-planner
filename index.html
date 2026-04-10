@@ -803,6 +803,10 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
         <div id="projectLegend"></div>
       </div>
       <div class="sidebar-section">
+        <h3>角色設定 <button class="btn btn-sm" onclick="openRoleModal()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
+        <div id="roleList"></div>
+      </div>
+      <div class="sidebar-section">
         <h3>人員 (<span id="peopleCount">0</span>) <button class="btn btn-sm" onclick="addPerson()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
         <div id="peopleList"></div>
       </div>
@@ -893,6 +897,32 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   </div>
 </div>
 
+<!-- Role Modal -->
+<div class="modal-overlay" id="roleModalOverlay" onclick="if(event.target===this)closeRoleModal()">
+  <div class="modal" style="width:400px">
+    <div class="modal-header">
+      <h2 id="roleModalTitle">新增角色</h2>
+      <button class="modal-close" onclick="closeRoleModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="roleEditIdx" value="-1">
+      <div class="form-group">
+        <label>角色名稱</label>
+        <input type="text" id="roleEditName" placeholder="例：外部顧問">
+      </div>
+      <div class="form-group">
+        <label>頭像顏色</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="roleColorPicker"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeRoleModal()">取消</button>
+      <button class="btn btn-danger" id="btnDeleteRole" onclick="deleteRole()" style="display:none">刪除</button>
+      <button class="btn btn-primary" onclick="saveRole()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <!-- Person Edit Modal -->
 <div class="modal-overlay" id="personModalOverlay" onclick="if(event.target===this)closePersonModal()">
   <div class="modal" style="width:400px">
@@ -965,7 +995,10 @@ const DEFAULT_STATE = {
     { id: 'm9', name: 'Mina', role: '正職' },
     { id: 'm10', name: 'Jane', role: '正職' },
   ],
-  roles: ['正職', '實習生'],
+  roles: [
+    { name: '正職', color: '#f59e0b' },
+    { name: '實習生', color: '#9ca3af' },
+  ],
   tasks: [
     { id: 't1',  name: '診斷書',             projectId: 'p1', assigneeIds: ['m2', 'm3'], start: '2026-04-20', end: '2026-05-27' },
     { id: 't2',  name: '一階',               projectId: 'p1', assigneeIds: ['m1'],       start: '2026-04-07', end: '2026-05-29' },
@@ -1005,14 +1038,12 @@ function setSyncStatus(status) {
   text.textContent = labels[status] || status;
 }
 
-const ROLE_COLORS = {
-  '正職': '#f59e0b',
-  '實習生': '#9ca3af',
-};
-const DEFAULT_ROLE_COLOR = '#6b7280';
+const ROLE_PALETTE = ['#f59e0b','#9ca3af','#3b82f6','#10b981','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6'];
 
 function getRoleColor(person) {
-  return ROLE_COLORS[person?.role] || DEFAULT_ROLE_COLOR;
+  if (!state?.roles) return '#6b7280';
+  const r = state.roles.find(r => r.name === person?.role);
+  return r?.color || '#6b7280';
 }
 
 function migrateState(s) {
@@ -1023,7 +1054,11 @@ function migrateState(s) {
       delete t.assigneeId;
     }
   });
-  if (!s.roles) s.roles = ['正職', '實習生'];
+  if (!s.roles) {
+    s.roles = [{ name: '正職', color: '#f59e0b' }, { name: '實習生', color: '#9ca3af' }];
+  } else if (s.roles.length > 0 && typeof s.roles[0] === 'string') {
+    s.roles = s.roles.map((r, i) => ({ name: r, color: ROLE_PALETTE[i % ROLE_PALETTE.length] }));
+  }
 }
 
 function loadStateLocal() {
@@ -1348,9 +1383,9 @@ function closePersonModal() {
 }
 
 function populateRoleDropdown(current) {
-  const roles = state.roles || ['正職', '實習生'];
+  const roles = state.roles || [];
   document.getElementById('personEditRole').innerHTML = roles.map(r =>
-    `<option value="${r}" ${r===current?'selected':''}>${r}</option>`
+    `<option value="${r.name}" ${r.name===current?'selected':''}>${r.name}</option>`
   ).join('');
 }
 
@@ -1382,6 +1417,82 @@ function removePerson(personId) {
   });
   state.people = state.people.filter(p => p.id !== personId);
   render();
+}
+
+// ═══════════════════════════════════════
+// Role Management
+// ═══════════════════════════════════════
+let selectedRoleColor = ROLE_PALETTE[0];
+
+function renderRoleColorPicker() {
+  document.getElementById('roleColorPicker').innerHTML = ROLE_PALETTE.map(c =>
+    `<div class="color-swatch ${c===selectedRoleColor?'selected':''}" style="background:${c}" onclick="selectedRoleColor='${c}';renderRoleColorPicker()"></div>`
+  ).join('');
+}
+
+function openRoleModal(idx) {
+  const deleteBtn = document.getElementById('btnDeleteRole');
+  if (idx !== undefined && idx >= 0) {
+    const r = state.roles[idx];
+    if (!r) return;
+    document.getElementById('roleModalTitle').textContent = '編輯角色';
+    document.getElementById('roleEditIdx').value = idx;
+    document.getElementById('roleEditName').value = r.name;
+    selectedRoleColor = r.color;
+    deleteBtn.style.display = '';
+  } else {
+    document.getElementById('roleModalTitle').textContent = '新增角色';
+    document.getElementById('roleEditIdx').value = -1;
+    document.getElementById('roleEditName').value = '';
+    selectedRoleColor = ROLE_PALETTE[state.roles.length % ROLE_PALETTE.length];
+    deleteBtn.style.display = 'none';
+  }
+  renderRoleColorPicker();
+  document.getElementById('roleModalOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('roleEditName').focus(), 100);
+}
+
+function closeRoleModal() {
+  document.getElementById('roleModalOverlay').classList.remove('open');
+}
+
+function saveRole() {
+  const idx = parseInt(document.getElementById('roleEditIdx').value);
+  const name = document.getElementById('roleEditName').value.trim();
+  if (!name) return alert('請輸入角色名稱');
+  if (idx >= 0) {
+    const oldName = state.roles[idx].name;
+    state.roles[idx] = { name, color: selectedRoleColor };
+    if (oldName !== name) {
+      state.people.forEach(p => { if (p.role === oldName) p.role = name; });
+    }
+  } else {
+    state.roles.push({ name, color: selectedRoleColor });
+  }
+  closeRoleModal();
+  render();
+}
+
+function deleteRole() {
+  const idx = parseInt(document.getElementById('roleEditIdx').value);
+  if (idx < 0) return;
+  const roleName = state.roles[idx].name;
+  const count = state.people.filter(p => p.role === roleName).length;
+  if (!confirm(`確定要刪除「${roleName}」角色？目前有 ${count} 位成員使用此角色。`)) return;
+  state.roles.splice(idx, 1);
+  closeRoleModal();
+  render();
+}
+
+function renderRoleList() {
+  document.getElementById('roleList').innerHTML = (state.roles || []).map((r, i) =>
+    `<div class="project-legend" style="cursor:pointer" onclick="openRoleModal(${i})">
+      <div class="project-dot" style="background:${r.color};border-radius:50%"></div>
+      <span>${r.name}</span>
+      <span style="font-size:.72rem;color:var(--text-secondary)">${state.people.filter(p=>p.role===r.name).length} 人</span>
+      <span style="margin-left:auto;font-size:.7rem;color:var(--text-secondary);opacity:.5">✎</span>
+    </div>`
+  ).join('');
 }
 
 // ═══════════════════════════════════════
@@ -1476,6 +1587,7 @@ function render() {
 // Rendering — Sidebar
 // ═══════════════════════════════════════
 function renderSidebar(overlapMap, overlapPeriods) {
+  renderRoleList();
   document.getElementById('projectLegend').innerHTML = state.projects.map(p =>
     `<div class="project-legend" style="cursor:pointer" onclick="openProjectModal('${p.id}')">
       <div class="project-dot" style="background:${p.color}"></div>
@@ -1582,25 +1694,54 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap
 function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap, overlapPeriods) {
   const weeks = generateWeeks(timeStart, timeEnd);
   const weekWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--week-width'));
+  const taskHeight = 24;
+  const taskGap = 2;
+  const totalWidth = weeks.length * weekWidth;
+
   let html = '<div class="gantt-header"><div class="gantt-header-row">';
-  html += '<div class="gantt-corner" style="height:40px">成員 / 週</div>';
+  html += '<div class="gantt-corner" style="height:36px">成員 / 週</div>';
   weeks.forEach(w => { html += `<div class="gantt-week-header" style="width:${weekWidth}px;font-size:.65rem;line-height:1.3">${w.label}</div>`; });
   html += '</div></div><div class="gantt-body">';
+
   state.people.forEach(person => {
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
+    const { laneMap, laneCount } = assignLanes(pTasks);
+    const rowH = Math.max(40, laneCount * (taskHeight + taskGap) + 8);
     const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
-    html += `<div class="gantt-row"><div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div>`;
-    weeks.forEach(w => {
-      const tasksInWeek = pTasks.filter(t => { const ts=parseDate(t.start),te=parseDate(t.end); return ts<=w.end&&te>=w.start; });
-      const olInWeek = overlapPeriods.some(o => o.personId===person.id && parseDate(o.overlapStart)<=w.end && parseDate(o.overlapEnd)>=w.start);
-      const bg = olInWeek ? 'background:rgba(239,68,68,.08)' : '';
-      html += `<div class="week-cell" style="width:${weekWidth}px;${bg}">`;
-      tasksInWeek.forEach(t => { const proj=state.projects.find(p=>p.id===t.projectId); const ol=isOverlapForPerson(personOverlapMap, person.id, t.id);
-        html += `<div class="week-task-chip ${ol?'overlap':''}" style="background:${proj?.color||'#999'}" onclick="openTaskModal('${t.id}')" onmouseenter="showTooltip(event,'${t.id}')" onmousemove="moveTooltip(event)" onmouseleave="hideTooltip()" title="${t.name}">${t.name}</div>`;
-      });
-      html += '</div>';
+
+    html += `<div class="gantt-row" style="height:${rowH}px">`;
+    html += `<div class="gantt-row-label ${hasOL?'has-overload':''}">${hasOL?'⚠ ':''}${person.name}</div>`;
+    html += `<div class="gantt-row-timeline" style="width:${totalWidth}px;height:${rowH}px">`;
+
+    weeks.forEach((w, i) => {
+      html += `<div class="gantt-grid-line week-border" style="left:${i * weekWidth}px"></div>`;
     });
-    html += '</div>';
+
+    overlapPeriods.filter(o => o.personId === person.id).forEach(o => {
+      const oS = parseDate(o.overlapStart), oE = parseDate(o.overlapEnd);
+      const left = dateToPx(oS, timeStart, timeEnd, totalWidth);
+      const right = dateToPx(addDays(oE, 1), timeStart, timeEnd, totalWidth);
+      if (right > left) html += `<div class="overlap-stripe" style="left:${left}px;width:${right - left}px"></div>`;
+    });
+
+    pTasks.forEach(t => {
+      const tS = parseDate(t.start), tE = parseDate(t.end);
+      const proj = state.projects.find(p => p.id === t.projectId);
+      const left = dateToPx(tS, timeStart, timeEnd, totalWidth);
+      const right = dateToPx(addDays(tE, 1), timeStart, timeEnd, totalWidth);
+      const width = Math.max(right - left, 4);
+      const lane = laneMap[t.id] || 0;
+      const top = 4 + lane * (taskHeight + taskGap);
+      const ol = isOverlapForPerson(personOverlapMap, person.id, t.id);
+
+      html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;height:${taskHeight}px;background:${proj?.color||'#999'};font-size:.68rem"
+        onclick="openTaskModal('${t.id}')"
+        onmouseenter="showTooltip(event,'${t.id}')"
+        onmousemove="moveTooltip(event)"
+        onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
+    });
+
+    html += '</div></div>';
   });
   html += '</div>';
   document.getElementById('ganttContainer').innerHTML = html;
