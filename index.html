@@ -225,6 +225,16 @@ input[type="date"], select {
   border-radius: 3px;
   flex-shrink: 0;
 }
+.color-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color .15s, transform .1s;
+}
+.color-swatch:hover { transform: scale(1.15); }
+.color-swatch.selected { border-color: var(--text); box-shadow: 0 0 0 2px rgba(0,0,0,.15); }
 .project-name-editable {
   cursor: text;
   padding: 1px 4px;
@@ -763,6 +773,7 @@ input[type="date"], select {
     <button class="btn" onclick="exportData()">匯出 JSON</button>
     <button class="btn" onclick="exportNotionCSV()" style="border-color:#a78bfa;color:#7c3aed">匯出 Notion CSV</button>
     <button class="btn" onclick="exportExcel()" style="border-color:#16a34a;color:#16a34a">匯出 Excel</button>
+    <button class="btn" onclick="openProjectModal()" style="border-color:var(--accent);color:var(--accent)">＋ 新增專案</button>
     <button class="btn btn-primary" onclick="openTaskModal()">＋ 新增任務</button>
   </div>
 </div>
@@ -836,6 +847,32 @@ input[type="date"], select {
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn btn-danger" id="btnDeleteTask" onclick="deleteTask()" style="display:none">刪除</button>
       <button class="btn btn-primary" onclick="saveTask()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Project Modal -->
+<div class="modal-overlay" id="projectModalOverlay" onclick="if(event.target===this)closeProjectModal()">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <h2 id="projectModalTitle">新增專案</h2>
+      <button class="modal-close" onclick="closeProjectModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="projectEditId">
+      <div class="form-group">
+        <label>專案名稱</label>
+        <input type="text" id="projectEditName" placeholder="例：Delta — 新功能開發">
+      </div>
+      <div class="form-group">
+        <label>顏色</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap" id="projectColorPicker"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeProjectModal()">取消</button>
+      <button class="btn btn-danger" id="btnDeleteProject" onclick="deleteProject()" style="display:none">刪除</button>
+      <button class="btn btn-primary" onclick="saveProject()">儲存</button>
     </div>
   </div>
 </div>
@@ -1171,6 +1208,70 @@ function renameProject(pid, newName) {
   render();
 }
 
+// ═══════════════════════════════════════
+// Project Modal
+// ═══════════════════════════════════════
+const PROJECT_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+let selectedProjectColor = PROJECT_COLORS[0];
+
+function renderColorPicker() {
+  document.getElementById('projectColorPicker').innerHTML = PROJECT_COLORS.map(c =>
+    `<div class="color-swatch ${c===selectedProjectColor?'selected':''}" style="background:${c}" onclick="pickProjectColor('${c}')"></div>`
+  ).join('');
+}
+function pickProjectColor(c) {
+  selectedProjectColor = c;
+  renderColorPicker();
+}
+function openProjectModal(pid) {
+  const deleteBtn = document.getElementById('btnDeleteProject');
+  if (pid) {
+    const proj = state.projects.find(p => p.id === pid);
+    if (!proj) return;
+    document.getElementById('projectModalTitle').textContent = '編輯專案';
+    document.getElementById('projectEditId').value = proj.id;
+    document.getElementById('projectEditName').value = proj.name;
+    selectedProjectColor = proj.color;
+    deleteBtn.style.display = '';
+  } else {
+    document.getElementById('projectModalTitle').textContent = '新增專案';
+    document.getElementById('projectEditId').value = '';
+    document.getElementById('projectEditName').value = '';
+    selectedProjectColor = PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)];
+    deleteBtn.style.display = 'none';
+  }
+  renderColorPicker();
+  document.getElementById('projectModalOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('projectEditName').focus(), 100);
+}
+function closeProjectModal() {
+  document.getElementById('projectModalOverlay').classList.remove('open');
+}
+function saveProject() {
+  const id = document.getElementById('projectEditId').value;
+  const name = document.getElementById('projectEditName').value.trim();
+  if (!name) return alert('請輸入專案名稱');
+  if (id) {
+    const proj = state.projects.find(p => p.id === id);
+    if (proj) { proj.name = name; proj.color = selectedProjectColor; }
+  } else {
+    const newId = 'p' + Date.now().toString(36);
+    state.projects.push({ id: newId, name, color: selectedProjectColor });
+  }
+  closeProjectModal();
+  render();
+}
+function deleteProject() {
+  const id = document.getElementById('projectEditId').value;
+  if (!id) return;
+  const taskCount = state.tasks.filter(t => t.projectId === id).length;
+  if (!confirm(`確定要刪除此專案？其下 ${taskCount} 個任務也會一併刪除。`)) return;
+  state.tasks = state.tasks.filter(t => t.projectId !== id);
+  state.projects = state.projects.filter(p => p.id !== id);
+  closeProjectModal();
+  render();
+}
+
 function setPage(page) {
   state.currentPage = page;
   document.getElementById('tabGantt').classList.toggle('active', page === 'gantt');
@@ -1211,13 +1312,10 @@ function render() {
 // ═══════════════════════════════════════
 function renderSidebar(overlapMap, overlapPeriods) {
   document.getElementById('projectLegend').innerHTML = state.projects.map(p =>
-    `<div class="project-legend">
+    `<div class="project-legend" style="cursor:pointer" onclick="openProjectModal('${p.id}')">
       <div class="project-dot" style="background:${p.color}"></div>
-      <span class="project-name-editable" contenteditable="true" spellcheck="false"
-        data-pid="${p.id}"
-        onblur="renameProject('${p.id}', this.textContent)"
-        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
-      >${p.name}</span>
+      <span>${p.name}</span>
+      <span style="margin-left:auto;font-size:.7rem;color:var(--text-secondary);opacity:.5">✎</span>
     </div>`
   ).join('');
 
