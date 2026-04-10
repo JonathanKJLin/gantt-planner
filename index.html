@@ -1616,7 +1616,7 @@ function renderProjectView() {
 
   // Per-project sections
   state.projects.forEach(proj => {
-    const projTasks = state.tasks.filter(t => t.projectId === proj.id);
+    const projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a,b) => parseDate(a.start) - parseDate(b.start));
     const totalDays = projTasks.reduce((s,t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     const participantMap = {};
     projTasks.forEach(t => {
