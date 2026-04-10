@@ -1141,6 +1141,7 @@ function generateWeeks(start, end) {
 function taskDuration(t) { return daysBetween(parseDate(t.start), parseDate(t.end)) + 1; }
 const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 function uid() { return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function strHash(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; } return Math.abs(h); }
 
 // ═══════════════════════════════════════
 // Assignee Helpers
@@ -1414,7 +1415,7 @@ function renderSidebar(overlapMap, overlapPeriods) {
   document.getElementById('peopleList').innerHTML = state.people.map(p => {
     const taskCount = state.tasks.filter(t => isAssignedTo(t, p.id)).length;
     const olc = personOverloads[p.id] || 0;
-    const hue = (parseInt(p.id.replace('m','')) * 37) % 360;
+    const hue = (strHash(p.name || p.id) * 37) % 360;
     return `<div class="person-item" draggable="true" data-drag-id="${p.id}" data-drag-type="person"
       ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
       <span class="drag-handle">⋮⋮</span>
