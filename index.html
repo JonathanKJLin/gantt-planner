@@ -1346,7 +1346,7 @@ function renderSidebar(overlapMap, overlapPeriods) {
       <div class="person-avatar" style="background:hsl(${hue},55%,55%)">${p.name[0]}</div>
       <div class="person-info"><div class="person-name">${p.name}</div><div class="person-tasks-count">${taskCount} 項任務</div></div>
       ${olc ? `<span class="person-overload">${olc} 重疊</span>` : ''}
-      <button class="btn-sm" onclick="removePerson('${p.id}')" style="opacity:0;transition:opacity .15s;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:.7rem" onmouseenter="this.style.opacity=1;this.style.color='var(--danger)'" onmouseleave="this.style.opacity=0;this.style.color='var(--text-secondary)'">&times;</button>
+      <button class="btn-sm" onclick="event.stopPropagation();removePerson('${p.id}')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:.85rem;font-weight:700;padding:2px 4px;opacity:.7;transition:opacity .15s" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.7">&times;</button>
     </div>`;
   }).join('');
 
