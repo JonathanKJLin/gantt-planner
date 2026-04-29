@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Resource Gantt Planner — 多專案人力排程</title>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root {
@@ -821,8 +820,6 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
     <button class="btn" onclick="openHistoryModal()">版本歷史</button>
     <button class="btn" onclick="importData()">匯入 JSON</button>
     <button class="btn" onclick="exportData()">匯出 JSON</button>
-    <button class="btn" onclick="exportNotionCSV()" style="border-color:#a78bfa;color:#7c3aed">匯出 Notion CSV</button>
-    <button class="btn" onclick="exportExcel()" style="border-color:#16a34a;color:#16a34a">匯出 Excel</button>
     <button class="btn" onclick="openProjectModal()" style="border-color:var(--accent);color:var(--accent)">＋ 新增專案</button>
     <button class="btn btn-primary" onclick="openTaskModal()">＋ 新增任務</button>
   </div>
@@ -885,11 +882,11 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
         <select id="taskProject"></select>
       </div>
       <div class="form-group">
-        <label>負責人（可多選）</label>
+        <label>負責人（可多選）<span style="font-weight:400;color:var(--text-secondary);font-size:.85rem"> · 可稍後指定</span></label>
         <div class="multi-select" id="assigneeSelect"></div>
       </div>
       <div class="form-group">
-        <label>開始日期</label>
+        <label>開始日期 <span style="font-weight:400;color:var(--text-secondary);font-size:.85rem">（與結束日期需同填或同空）</span></label>
         <input type="date" id="taskStart">
       </div>
       <div class="form-group">
@@ -907,7 +904,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 
 <!-- Project Modal -->
 <div class="modal-overlay" id="projectModalOverlay" onclick="if(event.target===this)closeProjectModal()">
-  <div class="modal" style="width:420px">
+  <div class="modal" style="width:480px;max-width:95vw">
     <div class="modal-header">
       <h2 id="projectModalTitle">新增專案</h2>
       <button class="modal-close" onclick="closeProjectModal()">&times;</button>
@@ -921,6 +918,10 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
       <div class="form-group">
         <label>顏色</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap" id="projectColorPicker"></div>
+      </div>
+      <div class="form-group" id="projectNewTasksGroup" style="display:none">
+        <label>一併新增任務（選填）</label>
+        <textarea id="projectNewTasks" rows="5" placeholder="每行一項任務名稱。人力與日期可之後在任務中補上。" style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:10px;font-family:inherit;font-size:.9rem;resize:vertical"></textarea>
       </div>
     </div>
     <div class="modal-footer">
@@ -1013,31 +1014,6 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 
 <input type="file" id="fileInput" accept=".json" style="display:none" onchange="handleImport(event)">
 
-<!-- Notion Guide Modal -->
-<div class="modal-overlay" id="notionGuideOverlay" onclick="if(event.target===this)closeNotionGuide()">
-  <div class="modal" style="width:560px">
-    <div class="modal-header">
-      <h2>Notion 匯入指引</h2>
-      <button class="modal-close" onclick="closeNotionGuide()">&times;</button>
-    </div>
-    <div class="modal-body" style="font-size:.88rem;line-height:1.7">
-      <p style="margin-bottom:12px">CSV 已下載完成。請依以下步驟在 Notion 建立共用排程資料庫：</p>
-      <div style="background:#f8f9fb;border-radius:8px;padding:16px;margin-bottom:16px">
-        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 1</strong>　打開 Notion → 任意頁面 → 右上角 <code>···</code> → <strong>Import</strong> → <strong>CSV</strong> → 選擇剛才下載的檔案</div>
-        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 2</strong>　匯入後會產生一個 Database。點進去，將「開始日期」和「結束日期」欄位的 property type 改成 <strong>Date</strong></div>
-        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 3</strong>　點右上角 <strong>＋ Add a view</strong> → 選 <strong>Timeline</strong> → 時間範圍設為「開始日期」到「結束日期」→ 這就是你的<strong>甘特圖</strong></div>
-        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 4</strong>　在 Timeline 視圖點 <strong>Group</strong> → 選「專案」→ 即可看到依專案分組的甘特圖</div>
-        <div style="margin-bottom:10px"><strong style="color:var(--accent)">Step 5</strong>　再加一個 <strong>Board view</strong>，Group by「負責人」→ 一眼看出每人工作量</div>
-        <div><strong style="color:var(--accent)">Step 6</strong>　點右上角 <strong>Share</strong> → 邀請團隊成員 → 大家就能共同編輯了</div>
-      </div>
-      <p style="color:var(--text-secondary);font-size:.82rem">建議的 Notion Views：<strong>Timeline</strong>（甘特圖）、<strong>Table</strong>（總覽）、<strong>Board by 負責人</strong>（人員負載）、<strong>Board by 專案</strong>（專案進度）</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-primary" onclick="closeNotionGuide()">知道了</button>
-    </div>
-  </div>
-</div>
-
 <script>
 // ═══════════════════════════════════════
 // Data Model
@@ -1116,6 +1092,7 @@ function migrateState(s) {
       t.assigneeIds = [t.assigneeId];
       delete t.assigneeId;
     }
+    if (!Array.isArray(t.assigneeIds)) t.assigneeIds = [];
   });
   if (!s.roles) {
     s.roles = [{ name: '正職', color: '#f59e0b' }, { name: '實習生', color: '#9ca3af' }];
@@ -1275,7 +1252,11 @@ function formatDate(d) {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
+function isTaskScheduled(t) {
+  return !!(t && t.start && t.end);
+}
 function shortDate(str) {
+  if (!str) return '—';
   const d = parseDate(str);
   return `${d.getMonth()+1}/${d.getDate()}`;
 }
@@ -1313,7 +1294,10 @@ function generateWeeks(start, end) {
   }
   return weeks;
 }
-function taskDuration(t) { return daysBetween(parseDate(t.start), parseDate(t.end)) + 1; }
+function taskDuration(t) {
+  if (!isTaskScheduled(t)) return 0;
+  return daysBetween(parseDate(t.start), parseDate(t.end)) + 1;
+}
 const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 function uid() { return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function strHash(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; } return Math.abs(h); }
@@ -1322,7 +1306,11 @@ function strHash(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = ((h <<
 // Assignee Helpers
 // ═══════════════════════════════════════
 function getAssigneeIds(t) { return t.assigneeIds || (t.assigneeId ? [t.assigneeId] : []); }
-function getAssigneeNames(t) { return getAssigneeIds(t).map(id => state.people.find(p=>p.id===id)?.name || '?').join(', '); }
+function getAssigneeNames(t) {
+  const ids = getAssigneeIds(t);
+  if (ids.length === 0) return '未指派';
+  return ids.map(id => state.people.find(p=>p.id===id)?.name || '?').join(', ');
+}
 function isAssignedTo(t, personId) { return getAssigneeIds(t).includes(personId); }
 
 // ═══════════════════════════════════════
@@ -1338,6 +1326,7 @@ function detectOverlaps() {
   const personTasks = {};
 
   state.tasks.forEach(t => {
+    if (!isTaskScheduled(t)) return;
     getAssigneeIds(t).forEach(pid => {
       if (!personTasks[pid]) personTasks[pid] = [];
       personTasks[pid].push(t);
@@ -1424,7 +1413,7 @@ function isOverlapForPerson(personOverlapMap, personId, taskId) {
 // Lane Assignment
 // ═══════════════════════════════════════
 function assignLanes(tasks) {
-  const sorted = [...tasks].sort((a, b) => parseDate(a.start) - parseDate(b.start));
+  const sorted = [...tasks].filter(isTaskScheduled).sort((a, b) => parseDate(a.start) - parseDate(b.start));
   const lanes = [];
   const laneMap = {};
   sorted.forEach(t => {
@@ -1466,6 +1455,8 @@ function pickProjectColor(c) {
 }
 function openProjectModal(pid) {
   const deleteBtn = document.getElementById('btnDeleteProject');
+  const newTasksGroup = document.getElementById('projectNewTasksGroup');
+  const newTasksTa = document.getElementById('projectNewTasks');
   if (pid) {
     const proj = state.projects.find(p => p.id === pid);
     if (!proj) return;
@@ -1474,12 +1465,16 @@ function openProjectModal(pid) {
     document.getElementById('projectEditName').value = proj.name;
     selectedProjectColor = proj.color;
     deleteBtn.style.display = '';
+    newTasksGroup.style.display = 'none';
+    newTasksTa.value = '';
   } else {
     document.getElementById('projectModalTitle').textContent = '新增專案';
     document.getElementById('projectEditId').value = '';
     document.getElementById('projectEditName').value = '';
     selectedProjectColor = PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)];
     deleteBtn.style.display = 'none';
+    newTasksGroup.style.display = '';
+    newTasksTa.value = '';
   }
   renderColorPicker();
   document.getElementById('projectModalOverlay').classList.add('open');
@@ -1498,6 +1493,10 @@ function saveProject() {
   } else {
     const newId = 'p' + Date.now().toString(36);
     state.projects.push({ id: newId, name, color: selectedProjectColor });
+    const raw = (document.getElementById('projectNewTasks') && document.getElementById('projectNewTasks').value) || '';
+    raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach(taskName => {
+      state.tasks.push({ id: uid(), name: taskName, projectId: newId, assigneeIds: [], start: null, end: null });
+    });
   }
   closeProjectModal();
   render(); scheduleSnapshot();
@@ -1793,7 +1792,7 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
       const hasOL = overlapMap[t.id];
       return `<div class="task-list-item" onclick="openTaskModal('${t.id}')">
         <div class="task-list-dot" style="background:${proj?.color||'#999'}"></div>
-        <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${getAssigneeNames(t)} · ${t.start} → ${t.end}</div></div>
+        <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${getAssigneeNames(t)} · ${isTaskScheduled(t) ? `${t.start} → ${t.end}` : '未排程'}</div></div>
         <div class="task-list-actions"><button class="btn btn-sm" onclick="event.stopPropagation();openTaskModal('${t.id}')">編輯</button></div>
       </div>`;
     }).join('');
@@ -1826,7 +1825,7 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap
   });
   html += '</div></div><div class="gantt-body">';
   state.people.forEach(person => {
-    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
+    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id) && isTaskScheduled(t));
     const { laneMap, laneCount } = assignLanes(pTasks);
     const rowH = Math.max(44, laneCount*(taskHeight+taskGap)+8);
     const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
@@ -1882,7 +1881,7 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMa
   html += '</div></div><div class="gantt-body">';
 
   state.people.forEach(person => {
-    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
+    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id) && isTaskScheduled(t));
     const { laneMap, laneCount } = assignLanes(pTasks);
     const rowH = Math.max(40, laneCount * (taskHeight + taskGap) + 8);
     const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
@@ -1962,7 +1961,7 @@ function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPe
   html += '</div></div><div class="gantt-body">';
 
   state.people.forEach(person => {
-    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id));
+    const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id) && isTaskScheduled(t));
     const { laneMap, laneCount } = assignLanes(pTasks);
     const rowH = Math.max(40, laneCount * (taskHeight + taskGap) + 8);
     const hasOL = pTasks.some(t => isOverlapForPerson(personOverlapMap, person.id, t.id));
@@ -2028,7 +2027,13 @@ function renderProjectView() {
 
   // Per-project sections
   state.projects.forEach(proj => {
-    const projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a,b) => parseDate(a.start) - parseDate(b.start));
+    const projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a, b) => {
+      const sa = isTaskScheduled(a), sb = isTaskScheduled(b);
+      if (sa && sb) return parseDate(a.start) - parseDate(b.start);
+      if (sa && !sb) return -1;
+      if (!sa && sb) return 1;
+      return (a.name || '').localeCompare(b.name || '', 'zh-Hant');
+    });
     const totalDays = projTasks.reduce((s,t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     const participantMap = {};
     projTasks.forEach(t => {
@@ -2065,7 +2070,7 @@ function renderProjectView() {
         <td>${getAssigneeNames(t)}</td>
         <td>${shortDate(t.start)}</td>
         <td>${shortDate(t.end)}</td>
-        <td style="text-align:right;font-weight:600">${dur} 天</td>
+        <td style="text-align:right;font-weight:600">${isTaskScheduled(t) ? dur + ' 天' : '—'}</td>
         <td><button class="pv-edit-btn" onclick="openTaskModal('${t.id}')">編輯</button></td>
       </tr>`;
     });
@@ -2138,8 +2143,11 @@ function showTooltip(e, taskId) {
       return `<div style="font-size:.75rem">與「${other.name}」重疊 ${o.overlapStart} ~ ${o.overlapEnd}</div>`;
     }).join('')}</div>`;
   }
+  const scheduleHtml = isTaskScheduled(t)
+    ? `${t.start} → ${t.end}（${dur}天）`
+    : '尚未排程';
   const tip = document.getElementById('tooltip');
-  tip.innerHTML = `<div class="tt-title">${t.name}</div><div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${getAssigneeNames(t)}</div><div class="tt-row"><span class="tt-label">期間：</span>${t.start} → ${t.end} (${dur}天)</div>${olHtml}`;
+  tip.innerHTML = `<div class="tt-title">${t.name}</div><div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${getAssigneeNames(t)}</div><div class="tt-row"><span class="tt-label">期間：</span>${scheduleHtml}</div>${olHtml}`;
   tip.style.display = 'block';
   moveTooltip(e);
 }
@@ -2174,15 +2182,15 @@ function openTaskModal(taskId) {
     document.querySelectorAll('.assignee-cb').forEach(cb => {
       cb.checked = ids.includes(cb.value);
     });
-    document.getElementById('taskStart').value = t.start;
-    document.getElementById('taskEnd').value = t.end;
+    document.getElementById('taskStart').value = t.start || '';
+    document.getElementById('taskEnd').value = t.end || '';
     deleteBtn.style.display = '';
   } else {
     document.getElementById('modalTitle').textContent = '新增任務';
     document.getElementById('taskId').value = '';
     document.getElementById('taskName').value = '';
-    document.getElementById('taskStart').value = state.startDate;
-    document.getElementById('taskEnd').value = state.startDate;
+    document.getElementById('taskStart').value = '';
+    document.getElementById('taskEnd').value = '';
     deleteBtn.style.display = 'none';
   }
   modal.classList.add('open');
@@ -2197,24 +2205,26 @@ function saveTask() {
   const start = document.getElementById('taskStart').value;
   const end = document.getElementById('taskEnd').value;
   if (!name) return alert('請輸入任務名稱');
-  if (assigneeIds.length === 0) return alert('請至少選擇一位負責人');
-  if (!start || !end) return alert('請選擇日期');
-  if (parseDate(start) > parseDate(end)) return alert('結束日期不可早於開始日期');
-  const taskStart = parseDate(start);
-  const taskEnd = parseDate(end);
-  const warnings = [];
-  assigneeIds.forEach(aid => {
-    const p = state.people.find(x => x.id === aid);
-    if (p?.leaveDate && taskEnd > parseDate(p.leaveDate)) {
-      warnings.push(`${p.name} 的離職日為 ${p.leaveDate}，此任務結束於 ${end}`);
-    }
-    if (p?.hireDate && taskStart < parseDate(p.hireDate)) {
-      warnings.push(`${p.name} 的入職日為 ${p.hireDate}，此任務開始於 ${start}`);
-    }
-  });
-  if (warnings.length > 0 && !confirm('⚠ 以下人員在任務期間尚未入職或已離職：\n\n' + warnings.join('\n') + '\n\n確定要繼續儲存嗎？')) return;
-  if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, {name,projectId,assigneeIds,start,end}); }
-  else { state.tasks.push({id:uid(),name,projectId,assigneeIds,start,end}); }
+  if ((start && !end) || (!start && end)) return alert('開始與結束日期請一併填寫，或兩者都留空（之後再排程）');
+  if (start && end) {
+    if (parseDate(start) > parseDate(end)) return alert('結束日期不可早於開始日期');
+    const taskStart = parseDate(start);
+    const taskEnd = parseDate(end);
+    const warnings = [];
+    assigneeIds.forEach(aid => {
+      const p = state.people.find(x => x.id === aid);
+      if (p?.leaveDate && taskEnd > parseDate(p.leaveDate)) {
+        warnings.push(`${p.name} 的離職日為 ${p.leaveDate}，此任務結束於 ${end}`);
+      }
+      if (p?.hireDate && taskStart < parseDate(p.hireDate)) {
+        warnings.push(`${p.name} 的入職日為 ${p.hireDate}，此任務開始於 ${start}`);
+      }
+    });
+    if (warnings.length > 0 && !confirm('⚠ 以下人員在任務期間尚未入職或已離職：\n\n' + warnings.join('\n') + '\n\n確定要繼續儲存嗎？')) return;
+  }
+  const payload = { name, projectId, assigneeIds, start: start || null, end: end || null };
+  if (id) { const task = state.tasks.find(t => t.id===id); if (task) Object.assign(task, payload); }
+  else { state.tasks.push({ id: uid(), ...payload }); }
   closeModal(); render(); scheduleSnapshot();
 }
 function deleteTask() {
@@ -2247,51 +2257,6 @@ function exportData() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = `gantt-planner-${formatDate(new Date())}.json`; a.click();
   URL.revokeObjectURL(url);
-}
-
-// ═══════════════════════════════════════
-// Notion CSV Export
-// ═══════════════════════════════════════
-function exportNotionCSV() {
-  const BOM = '\uFEFF';
-  const headers = ['任務名稱', '專案', '負責人', '開始日期', '結束日期', '天數'];
-  const rows = state.tasks
-    .sort((a, b) => {
-      const pi = state.projects.findIndex(p => p.id === a.projectId) - state.projects.findIndex(p => p.id === b.projectId);
-      return pi !== 0 ? pi : parseDate(a.start) - parseDate(b.start);
-    })
-    .map(t => {
-      const proj = state.projects.find(p => p.id === t.projectId);
-      const dur = taskDuration(t);
-      const fmtDate = s => { const d = parseDate(s); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`; };
-      return [
-        csvEscape(t.name),
-        csvEscape(proj?.name.split('—')[0].trim() || ''),
-        csvEscape(getAssigneeNames(t)),
-        fmtDate(t.start),
-        fmtDate(t.end),
-        dur
-      ].join(',');
-    });
-
-  const csv = BOM + headers.join(',') + '\n' + rows.join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `gantt-planner-notion-${formatDate(new Date())}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-
-  document.getElementById('notionGuideOverlay').classList.add('open');
-}
-
-function csvEscape(val) {
-  const s = String(val);
-  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"';
-  }
-  return s;
 }
 
 // ═══════════════════════════════════════
@@ -2372,115 +2337,6 @@ async function restoreVersion(historyId) {
   render();
   closeHistoryModal();
   setSyncStatus('connected');
-}
-
-function closeNotionGuide() {
-  document.getElementById('notionGuideOverlay').classList.remove('open');
-}
-
-// ═══════════════════════════════════════
-// Excel Export (via SheetJS)
-// ═══════════════════════════════════════
-function exportExcel() {
-  const wb = XLSX.utils.book_new();
-
-  // ── Sheet 1: All Tasks ──
-  const allRows = state.tasks
-    .sort((a, b) => {
-      const pi = state.projects.findIndex(p => p.id === a.projectId) - state.projects.findIndex(p => p.id === b.projectId);
-      return pi !== 0 ? pi : parseDate(a.start) - parseDate(b.start);
-    })
-    .map(t => {
-      const proj = state.projects.find(p => p.id === t.projectId);
-      const { overlapMap } = detectOverlaps();
-      return {
-        '任務名稱': t.name,
-        '專案': proj?.name || '',
-        '負責人': getAssigneeNames(t),
-        '開始日期': parseDate(t.start),
-        '結束日期': parseDate(t.end),
-        '天數': taskDuration(t),
-        '重疊': overlapMap[t.id] ? '⚠ 是' : ''
-      };
-    });
-  const ws1 = XLSX.utils.json_to_sheet(allRows);
-  formatSheet(ws1, [22, 24, 10, 12, 12, 6, 8]);
-  formatDateCols(ws1, [3, 4], allRows.length);
-  XLSX.utils.book_append_sheet(wb, ws1, '全部任務');
-
-  // ── Sheet per project ──
-  state.projects.forEach(proj => {
-    const rows = state.tasks
-      .filter(t => t.projectId === proj.id)
-      .sort((a, b) => parseDate(a.start) - parseDate(b.start))
-      .map(t => {
-        return {
-          '任務名稱': t.name,
-          '負責人': getAssigneeNames(t),
-          '開始日期': parseDate(t.start),
-          '結束日期': parseDate(t.end),
-          '天數': taskDuration(t)
-        };
-      });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    formatSheet(ws, [22, 10, 12, 12, 6]);
-    formatDateCols(ws, [2, 3], rows.length);
-    const sheetName = proj.name.split('—')[0].trim();
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  });
-
-  // ── Sheet: Cross-project matrix ──
-  const matrixRows = [];
-  state.people.forEach(person => {
-    const row = { '成員': person.name };
-    let total = 0;
-    let projCount = 0;
-    state.projects.forEach(proj => {
-      const days = state.tasks
-        .filter(t => isAssignedTo(t, person.id) && t.projectId === proj.id)
-        .reduce((s, t) => s + taskDuration(t), 0);
-      const colName = proj.name.split('—')[0].trim();
-      row[colName] = days || '';
-      total += days;
-      if (days > 0) projCount++;
-    });
-    row['總天數'] = total;
-    row['參與專案數'] = projCount;
-    matrixRows.push(row);
-  });
-  const totalsRow = { '成員': '合計' };
-  let grand = 0;
-  state.projects.forEach(proj => {
-    const d = state.tasks.filter(t => t.projectId === proj.id).reduce((s, t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
-    totalsRow[proj.name.split('—')[0].trim()] = d;
-    grand += d;
-  });
-  totalsRow['總天數'] = grand;
-  totalsRow['參與專案數'] = '';
-  matrixRows.push(totalsRow);
-
-  const ws3 = XLSX.utils.json_to_sheet(matrixRows);
-  formatSheet(ws3, [10, 10, 10, 10, 8, 10]);
-  XLSX.utils.book_append_sheet(wb, ws3, '人力分配矩陣');
-
-  XLSX.writeFile(wb, `gantt-planner-${formatDate(new Date())}.xlsx`);
-}
-
-function formatSheet(ws, widths) {
-  ws['!cols'] = widths.map(w => ({ wch: w }));
-}
-
-function formatDateCols(ws, colIndices, rowCount) {
-  const fmt = 'yyyy/mm/dd';
-  for (let r = 1; r <= rowCount; r++) {
-    colIndices.forEach(c => {
-      const addr = XLSX.utils.encode_cell({ r, c });
-      if (ws[addr] && ws[addr].t === 'd') {
-        ws[addr].t = 'd';
-        ws[addr].z = fmt;
-      }
-    });
-  }
 }
 
 function importData() { document.getElementById('fileInput').click(); }
