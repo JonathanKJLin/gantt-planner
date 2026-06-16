@@ -105,7 +105,26 @@ body {
 .sync-badge.syncing .sync-dot { background: #3b82f6; animation: pulse-dot 1s infinite; }
 .sync-badge.offline { background: #fef2f2; color: #dc2626; }
 .sync-badge.offline .sync-dot { background: #ef4444; }
+.sync-badge.notion { background: #f5f3ff; color: #6d28d9; }
+.sync-badge.notion .sync-dot { background: #8b5cf6; }
 @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+.notion-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: linear-gradient(90deg, #f5f3ff 0%, #eff6ff 100%);
+  border-bottom: 1px solid #ddd6fe;
+  font-size: .82rem;
+  color: #5b21b6;
+}
+.notion-banner a { color: #4f46e5; font-weight: 600; }
+body.read-only .edit-only { display: none !important; }
+body.read-only [draggable="true"] { cursor: default; }
+body.read-only .drag-handle { display: none; }
 
 /* ── Buttons ── */
 .btn {
@@ -792,6 +811,11 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 </head>
 <body>
 
+<div class="notion-banner" id="notionBanner" style="display:none">
+  <span>📋 任務由 <strong>Notion</strong> 維護，此頁面為唯讀甘特圖</span>
+  <span>上次同步：<span id="notionSyncTime">—</span></span>
+</div>
+
 <!-- Top Bar -->
 <div class="topbar">
   <h1>Resource Gantt Planner</h1>
@@ -817,11 +841,11 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   </div>
   <div class="topbar-right">
     <div class="sync-badge offline" id="syncBadge"><span class="sync-dot"></span><span id="syncText">離線</span></div>
-    <button class="btn" onclick="openHistoryModal()">版本歷史</button>
-    <button class="btn" onclick="importData()">匯入 JSON</button>
+    <button class="btn edit-only" onclick="openHistoryModal()">版本歷史</button>
+    <button class="btn edit-only" onclick="importData()">匯入 JSON</button>
     <button class="btn" onclick="exportData()">匯出 JSON</button>
-    <button class="btn" onclick="openProjectModal()" style="border-color:var(--accent);color:var(--accent)">＋ 新增專案</button>
-    <button class="btn btn-primary" onclick="openTaskModal()">＋ 新增任務</button>
+    <button class="btn edit-only" onclick="openProjectModal()" style="border-color:var(--accent);color:var(--accent)">＋ 新增專案</button>
+    <button class="btn btn-primary edit-only" onclick="openTaskModal()">＋ 新增任務</button>
   </div>
 </div>
 
@@ -834,11 +858,11 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
         <div id="projectLegend"></div>
       </div>
       <div class="sidebar-section">
-        <h3>角色設定 <button class="btn btn-sm" onclick="openRoleModal()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
+        <h3>角色設定 <button class="btn btn-sm edit-only" onclick="openRoleModal()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
         <div id="roleList"></div>
       </div>
       <div class="sidebar-section">
-        <h3>人員 (<span id="peopleCount">0</span>) <button class="btn btn-sm" onclick="addPerson()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
+        <h3>人員 (<span id="peopleCount">0</span>) <button class="btn btn-sm edit-only" onclick="addPerson()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
         <div id="peopleList"></div>
       </div>
       <div class="sidebar-section" id="alertsSection" style="display:none">
@@ -1059,6 +1083,9 @@ const DEFAULT_STATE = {
 
 let state;
 
+// Notion is the source of truth — UI is read-only; Supabase sync runs server-side.
+const NOTION_READ_ONLY = true;
+
 // ═══════════════════════════════════════
 // Supabase Setup
 // ═══════════════════════════════════════
@@ -1073,8 +1100,44 @@ function setSyncStatus(status) {
   const badge = document.getElementById('syncBadge');
   const text = document.getElementById('syncText');
   badge.className = 'sync-badge ' + status;
-  const labels = { connected: '已同步', syncing: '同步中...', offline: '離線' };
+  const labels = {
+    connected: NOTION_READ_ONLY ? 'Notion 已同步' : '已同步',
+    syncing: '同步中...',
+    offline: '離線',
+    notion: 'Notion 同步',
+  };
   text.textContent = labels[status] || status;
+}
+
+function guardEdit() {
+  if (!NOTION_READ_ONLY) return false;
+  alert('此甘特圖為 Notion 唯讀模式。請在 Notion 任務資料庫中編輯，系統會定時同步至甘特圖。');
+  return true;
+}
+
+function applyReadOnlyUI() {
+  if (!NOTION_READ_ONLY) return;
+  document.body.classList.add('read-only');
+  const banner = document.getElementById('notionBanner');
+  if (banner) banner.style.display = 'flex';
+  setSyncStatus('notion');
+}
+
+async function loadSyncStatus() {
+  if (!NOTION_READ_ONLY) return;
+  try {
+    const { data } = await sb.from('gantt_sync_status').select('last_sync_at,status,task_count').maybeSingle();
+    const el = document.getElementById('notionSyncTime');
+    if (!el) return;
+    if (data?.last_sync_at) {
+      el.textContent = new Date(data.last_sync_at).toLocaleString('zh-TW');
+      if (data.status === 'ok') setSyncStatus('connected');
+    } else {
+      el.textContent = '等待首次同步';
+    }
+  } catch (err) {
+    console.warn('Sync status unavailable:', err.message);
+  }
 }
 
 const ROLE_PALETTE = ['#f59e0b','#9ca3af','#3b82f6','#10b981','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6'];
@@ -1137,6 +1200,10 @@ async function loadState() {
       migrateState(state);
       localStorage.setItem('gantt-planner-state', JSON.stringify(state));
       setSyncStatus('connected');
+    } else if (NOTION_READ_ONLY) {
+      state = data?.data ? data.data : { ...JSON.parse(JSON.stringify(DEFAULT_STATE)), tasks: [], projects: [], people: [] };
+      migrateState(state);
+      setSyncStatus('offline');
     } else if (local && local.tasks && local.tasks.length > 0) {
       await pushToSupabase();
       setSyncStatus('connected');
@@ -1155,6 +1222,8 @@ let lastSnapshotTime = 0;
 const SNAPSHOT_INTERVAL = 5000;
 
 async function pushToSupabase() {
+  if (NOTION_READ_ONLY) return;
+
   const stateToSave = { ...state };
   delete stateToSave.currentPage;
   delete stateToSave.viewMode;
@@ -1173,6 +1242,10 @@ async function pushToSupabase() {
 }
 
 function scheduleSnapshot() {
+  if (NOTION_READ_ONLY) {
+    saveStateLocal();
+    return;
+  }
   saveState();
   const now = Date.now();
   if (now - lastSnapshotTime > SNAPSHOT_INTERVAL) {
@@ -1206,7 +1279,7 @@ function saveStateLocal() {
 function saveState() {
   saveStateLocal();
 
-  if (isInitializing) return;
+  if (isInitializing || NOTION_READ_ONLY) return;
 
   if (!isSyncing) {
     isSyncing = true;
@@ -1236,6 +1309,7 @@ function subscribeToRealtime() {
         syncDateInputs();
         render();
         setSyncStatus('connected');
+        if (NOTION_READ_ONLY) loadSyncStatus();
       }
     })
     .subscribe((status) => {
@@ -1431,6 +1505,7 @@ function assignLanes(tasks) {
 // Page Navigation
 // ═══════════════════════════════════════
 function renameProject(pid, newName) {
+  if (guardEdit()) return;
   const trimmed = newName.trim();
   const proj = state.projects.find(p => p.id === pid);
   if (!proj || !trimmed || proj.name === trimmed) return;
@@ -1454,6 +1529,7 @@ function pickProjectColor(c) {
   renderColorPicker();
 }
 function openProjectModal(pid) {
+  if (guardEdit()) return;
   const deleteBtn = document.getElementById('btnDeleteProject');
   const newTasksGroup = document.getElementById('projectNewTasksGroup');
   const newTasksTa = document.getElementById('projectNewTasks');
@@ -1484,6 +1560,7 @@ function closeProjectModal() {
   document.getElementById('projectModalOverlay').classList.remove('open');
 }
 function saveProject() {
+  if (guardEdit()) return;
   const id = document.getElementById('projectEditId').value;
   const name = document.getElementById('projectEditName').value.trim();
   if (!name) return alert('請輸入專案名稱');
@@ -1502,6 +1579,7 @@ function saveProject() {
   render(); scheduleSnapshot();
 }
 function deleteProject() {
+  if (guardEdit()) return;
   const id = document.getElementById('projectEditId').value;
   if (!id) return;
   const taskCount = state.tasks.filter(t => t.projectId === id).length;
@@ -1516,6 +1594,7 @@ function deleteProject() {
 // People Management
 // ═══════════════════════════════════════
 function addPerson() {
+  if (guardEdit()) return;
   document.getElementById('personModalTitle').textContent = '新增成員';
   document.getElementById('personEditId').value = '';
   document.getElementById('personEditName').value = '';
@@ -1527,6 +1606,7 @@ function addPerson() {
 }
 
 function openPersonModal(personId) {
+  if (guardEdit()) return;
   const p = state.people.find(x => x.id === personId);
   if (!p) return;
   document.getElementById('personModalTitle').textContent = '編輯成員';
@@ -1551,6 +1631,7 @@ function populateRoleDropdown(current) {
 }
 
 function savePersonEdit() {
+  if (guardEdit()) return;
   const id = document.getElementById('personEditId').value;
   const name = document.getElementById('personEditName').value.trim();
   const role = document.getElementById('personEditRole').value;
@@ -1569,6 +1650,7 @@ function savePersonEdit() {
 }
 
 function removePerson(personId) {
+  if (guardEdit()) return;
   const person = state.people.find(p => p.id === personId);
   if (!person) return;
   const taskCount = state.tasks.filter(t => isAssignedTo(t, personId)).length;
@@ -1594,6 +1676,7 @@ function renderRoleColorPicker() {
 }
 
 function openRoleModal(idx) {
+  if (guardEdit()) return;
   const deleteBtn = document.getElementById('btnDeleteRole');
   if (idx !== undefined && idx >= 0) {
     const r = state.roles[idx];
@@ -1620,6 +1703,7 @@ function closeRoleModal() {
 }
 
 function saveRole() {
+  if (guardEdit()) return;
   const idx = parseInt(document.getElementById('roleEditIdx').value);
   const name = document.getElementById('roleEditName').value.trim();
   if (!name) return alert('請輸入角色名稱');
@@ -1637,6 +1721,7 @@ function saveRole() {
 }
 
 function deleteRole() {
+  if (guardEdit()) return;
   const idx = parseInt(document.getElementById('roleEditIdx').value);
   if (idx < 0) return;
   const roleName = state.roles[idx].name;
@@ -1665,6 +1750,7 @@ let _dragId = null;
 let _dragType = null;
 
 function handleDragStart(e) {
+  if (NOTION_READ_ONLY) { e.preventDefault(); return; }
   const el = e.target.closest('[data-drag-id]');
   if (!el) return;
   _dragId = el.dataset.dragId;
@@ -1689,6 +1775,7 @@ function handleDragLeave(e) {
 
 function handleDrop(e) {
   e.preventDefault();
+  if (NOTION_READ_ONLY) return;
   const el = e.target.closest('[data-drag-id]');
   if (!el || !_dragId) return;
   const targetId = el.dataset.dragId;
@@ -1790,9 +1877,13 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
   document.getElementById('taskList').innerHTML = state.tasks.map(t => {
       const proj = state.projects.find(p => p.id === t.projectId);
       const hasOL = overlapMap[t.id];
+      const metaParts = [];
+      if (t.wbsPath) metaParts.push(t.wbsPath);
+      metaParts.push(getAssigneeNames(t));
+      metaParts.push(isTaskScheduled(t) ? `${t.start} → ${t.end}` : '未排程');
       return `<div class="task-list-item" onclick="openTaskModal('${t.id}')">
         <div class="task-list-dot" style="background:${proj?.color||'#999'}"></div>
-        <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${getAssigneeNames(t)} · ${isTaskScheduled(t) ? `${t.start} → ${t.end}` : '未排程'}</div></div>
+        <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${metaParts.join(' · ')}</div></div>
         <div class="task-list-actions"><button class="btn btn-sm" onclick="event.stopPropagation();openTaskModal('${t.id}')">編輯</button></div>
       </div>`;
     }).join('');
@@ -2146,8 +2237,11 @@ function showTooltip(e, taskId) {
   const scheduleHtml = isTaskScheduled(t)
     ? `${t.start} → ${t.end}（${dur}天）`
     : '尚未排程';
+  const wbsHtml = t.wbsPath
+    ? `<div class="tt-row"><span class="tt-label">WBS：</span>${t.wbsPath}</div>`
+    : '';
   const tip = document.getElementById('tooltip');
-  tip.innerHTML = `<div class="tt-title">${t.name}</div><div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${getAssigneeNames(t)}</div><div class="tt-row"><span class="tt-label">期間：</span>${scheduleHtml}</div>${olHtml}`;
+  tip.innerHTML = `<div class="tt-title">${t.name}</div>${wbsHtml}<div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${getAssigneeNames(t)}</div><div class="tt-row"><span class="tt-label">期間：</span>${scheduleHtml}</div>${olHtml}`;
   tip.style.display = 'block';
   moveTooltip(e);
 }
@@ -2168,13 +2262,16 @@ function populateModalDropdowns() {
   ).join('');
 }
 function openTaskModal(taskId) {
+  if (!taskId && guardEdit()) return;
   populateModalDropdowns();
   const modal = document.getElementById('modalOverlay');
   const deleteBtn = document.getElementById('btnDeleteTask');
+  const saveBtn = document.querySelector('#modalOverlay .btn-primary');
+  const readOnly = NOTION_READ_ONLY && !!taskId;
   document.querySelectorAll('.assignee-cb').forEach(cb => cb.checked = false);
   if (taskId) {
     const t = state.tasks.find(x => x.id === taskId); if (!t) return;
-    document.getElementById('modalTitle').textContent = '編輯任務';
+    document.getElementById('modalTitle').textContent = readOnly ? '查看任務（Notion 唯讀）' : '編輯任務';
     document.getElementById('taskId').value = t.id;
     document.getElementById('taskName').value = t.name;
     document.getElementById('taskProject').value = t.projectId;
@@ -2184,7 +2281,8 @@ function openTaskModal(taskId) {
     });
     document.getElementById('taskStart').value = t.start || '';
     document.getElementById('taskEnd').value = t.end || '';
-    deleteBtn.style.display = '';
+    deleteBtn.style.display = readOnly ? 'none' : '';
+    if (saveBtn) saveBtn.style.display = readOnly ? 'none' : '';
   } else {
     document.getElementById('modalTitle').textContent = '新增任務';
     document.getElementById('taskId').value = '';
@@ -2192,12 +2290,19 @@ function openTaskModal(taskId) {
     document.getElementById('taskStart').value = '';
     document.getElementById('taskEnd').value = '';
     deleteBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = '';
   }
+  ['taskName', 'taskProject', 'taskStart', 'taskEnd'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = readOnly;
+  });
+  document.querySelectorAll('.assignee-cb').forEach(cb => { cb.disabled = readOnly; });
   modal.classList.add('open');
-  setTimeout(() => document.getElementById('taskName').focus(), 100);
+  if (!readOnly) setTimeout(() => document.getElementById('taskName').focus(), 100);
 }
 function closeModal() { document.getElementById('modalOverlay').classList.remove('open'); }
 function saveTask() {
+  if (guardEdit()) return;
   const id = document.getElementById('taskId').value;
   const name = document.getElementById('taskName').value.trim();
   const projectId = document.getElementById('taskProject').value;
@@ -2228,6 +2333,7 @@ function saveTask() {
   closeModal(); render(); scheduleSnapshot();
 }
 function deleteTask() {
+  if (guardEdit()) return;
   const id = document.getElementById('taskId').value; if (!id) return;
   if (!confirm('確定要刪除此任務？')) return;
   state.tasks = state.tasks.filter(t => t.id !== id);
@@ -2263,6 +2369,7 @@ function exportData() {
 // Version History
 // ═══════════════════════════════════════
 async function openHistoryModal() {
+  if (guardEdit()) return;
   document.getElementById('historyModalOverlay').classList.add('open');
   document.getElementById('historyList').innerHTML = '';
   document.getElementById('historyLoading').style.display = '';
@@ -2306,6 +2413,7 @@ function closeHistoryModal() {
 }
 
 async function createNamedSnapshot() {
+  if (guardEdit()) return;
   const label = document.getElementById('snapshotLabel').value.trim();
   if (!label) return alert('請輸入快照名稱');
   const stateToSave = { ...state };
@@ -2317,6 +2425,7 @@ async function createNamedSnapshot() {
 }
 
 async function restoreVersion(historyId) {
+  if (guardEdit()) return;
   if (!confirm('確定要還原到此版本？目前的資料會被覆蓋（但會先自動建立一個快照）。')) return;
 
   const stateToSave = { ...state };
@@ -2339,8 +2448,12 @@ async function restoreVersion(historyId) {
   setSyncStatus('connected');
 }
 
-function importData() { document.getElementById('fileInput').click(); }
+function importData() {
+  if (guardEdit()) return;
+  document.getElementById('fileInput').click();
+}
 function handleImport(e) {
+  if (guardEdit()) { e.target.value = ''; return; }
   const file = e.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = (evt) => {
@@ -2358,7 +2471,9 @@ function handleImport(e) {
 // Init
 // ═══════════════════════════════════════
 async function init() {
+  applyReadOnlyUI();
   await loadState();
+  await loadSyncStatus();
   syncDateInputs();
   document.getElementById('inputStart').addEventListener('change', e => { state.startDate = e.target.value; render(); });
   document.getElementById('inputEnd').addEventListener('change', e => { state.endDate = e.target.value; render(); });

@@ -1,0 +1,16 @@
+# Supabase local config — link to remote with: supabase link --project-ref geerhvkkgnxansiohifq
+project_id = "geerhvkkgnxansiohifq"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[db.migrations]
+enabled = true
