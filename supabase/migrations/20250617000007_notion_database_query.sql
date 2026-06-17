@@ -297,7 +297,8 @@ begin
     raise exception 'Notion token not found in vault (name=notion)';
   end if;
 
-  delete from public.notion_page_cache;
+  -- "where true" required: API roles block unqualified DELETE (safeupdate)
+  delete from public.notion_page_cache where true;
 
   loop
     v_post_body := case
