@@ -2022,10 +2022,17 @@ function setPage(page) {
 // ═══════════════════════════════════════
 // Rendering — Main
 // ═══════════════════════════════════════
-const TIMELINE_BUFFER_MONTHS = 12;
+const TIMELINE_BUFFER_MONTHS = 6;
+const TIMELINE_EXTEND_MONTHS = 6;   // how many months to add each time an edge is reached
+const TIMELINE_EDGE_THRESHOLD = 300; // px from an edge that triggers extension
 let _todayPx = null;
 
-// Timeline spans well beyond the data + today on both sides so it feels endless.
+// Current dynamic timeline bounds. Initialized from data + buffer, then grown
+// on demand as the user scrolls toward either edge (effectively endless).
+let _timeStart = null, _timeEnd = null;
+let _extendingRange = false;
+
+// Base range = task data + today, padded by TIMELINE_BUFFER_MONTHS on each side.
 function computeTimeRange() {
   const today = new Date(); today.setHours(0,0,0,0);
   let lo = new Date(today), hi = new Date(today);
@@ -2038,6 +2045,47 @@ function computeTimeRange() {
   const start = new Date(lo.getFullYear(), lo.getMonth() - TIMELINE_BUFFER_MONTHS, 1);
   const end = new Date(hi.getFullYear(), hi.getMonth() + TIMELINE_BUFFER_MONTHS + 1, 0);
   return { start, end };
+}
+
+// Keep _timeStart/_timeEnd, only widening to cover data (e.g. after a sync) so a
+// user's manual extension is never lost. Returns the active range.
+function ensureTimeRange() {
+  const base = computeTimeRange();
+  if (!_timeStart || !_timeEnd) {
+    _timeStart = base.start; _timeEnd = base.end;
+  } else {
+    if (base.start < _timeStart) _timeStart = base.start;
+    if (base.end > _timeEnd) _timeEnd = base.end;
+  }
+  return { start: _timeStart, end: _timeEnd };
+}
+
+function extendTimelineLeft(months) {
+  _timeStart = new Date(_timeStart.getFullYear(), _timeStart.getMonth() - months, 1);
+}
+function extendTimelineRight(months) {
+  _timeEnd = new Date(_timeEnd.getFullYear(), _timeEnd.getMonth() + months + 1, 0);
+}
+
+// On scroll near an edge, grow the range and re-render while preserving the
+// visible position so scrolling feels continuous in both directions.
+function onGanttScroll() {
+  const wrap = document.getElementById('ganttWrapper');
+  if (!wrap || _extendingRange || state.currentPage !== 'gantt') return;
+  const atLeft = wrap.scrollLeft <= TIMELINE_EDGE_THRESHOLD;
+  const atRight = wrap.scrollLeft + wrap.clientWidth >= wrap.scrollWidth - TIMELINE_EDGE_THRESHOLD;
+  if (!atLeft && !atRight) return;
+
+  _extendingRange = true;
+  const oldWidth = wrap.scrollWidth;
+  const oldLeft = wrap.scrollLeft;
+  if (atLeft) extendTimelineLeft(TIMELINE_EXTEND_MONTHS);
+  else extendTimelineRight(TIMELINE_EXTEND_MONTHS);
+  render();
+  // Re-rendering resets scroll; restore it (and offset by the width added on the
+  // left so the same content stays under the cursor).
+  wrap.scrollLeft = atLeft ? oldLeft + (wrap.scrollWidth - oldWidth) : oldLeft;
+  _extendingRange = false;
 }
 
 function rowLabelWidth() {
@@ -2158,7 +2206,7 @@ function render() {
   updateProjFilterButton();
   const { overlapMap, personOverlapMap, overlapPeriods, personOverloaded } = detectOverlaps(getVisibleTasks());
   const hideWeekend = document.getElementById('chkHideWeekend').checked;
-  const { start: timeStart, end: timeEnd } = computeTimeRange();
+  const { start: timeStart, end: timeEnd } = ensureTimeRange();
   const today = new Date(); today.setHours(0,0,0,0);
 
   renderSidebar(overlapMap, overlapPeriods, personOverloaded);
@@ -2848,6 +2896,8 @@ async function init() {
   setViewMode(state.viewMode || 'day');
   setPage(state.currentPage || 'gantt');
   isInitializing = false;
+  const wrap = document.getElementById('ganttWrapper');
+  if (wrap) wrap.addEventListener('scroll', onGanttScroll, { passive: true });
   requestAnimationFrame(scrollToToday);
   subscribeToRealtime();
 }
