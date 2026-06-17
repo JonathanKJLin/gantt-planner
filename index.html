@@ -403,7 +403,22 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   pointer-events: none;
 }
 .gantt-grid-line.week-border { background: #dde1e6; }
-.gantt-grid-line.today { background: var(--accent); opacity: .3; width: 2px; }
+.gantt-grid-line.today { background: var(--accent); opacity: 1; width: 2px; z-index: 4; }
+.today-flag {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #fff;
+  font-size: .62rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 9px;
+  white-space: nowrap;
+  z-index: 18;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
 .gantt-task {
   position: absolute;
   height: var(--task-height);
@@ -840,10 +855,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   </div>
   <div class="sep"></div>
   <div class="topbar-controls" id="ganttControls">
-    <label style="font-size:.8rem;color:var(--text-secondary)">起始</label>
-    <input type="date" id="inputStart">
-    <label style="font-size:.8rem;color:var(--text-secondary)">結束</label>
-    <input type="date" id="inputEnd">
+    <button class="btn" id="btnToday" onclick="scrollToToday()">回到今日</button>
     <div class="btn-group">
       <button class="btn active" id="btnDayView" onclick="setViewMode('day')">日檢視</button>
       <button class="btn" id="btnWeekView" onclick="setViewMode('week')">週檢視</button>
@@ -1785,11 +1797,10 @@ function deleteRole() {
 
 function renderRoleList() {
   document.getElementById('roleList').innerHTML = (state.roles || []).map((r, i) =>
-    `<div class="project-legend" style="cursor:pointer" onclick="openRoleModal(${i})">
+    `<div class="project-legend">
       <div class="project-dot" style="background:${r.color};border-radius:50%"></div>
       <span>${r.name}</span>
-      <span style="font-size:.72rem;color:var(--text-secondary)">${state.people.filter(p=>p.role===r.name).length} 人</span>
-      <span style="margin-left:auto;font-size:.7rem;color:var(--text-secondary);opacity:.5">✎</span>
+      <span style="margin-left:auto;font-size:.72rem;color:var(--text-secondary)">${state.people.filter(p=>p.role===r.name).length} 人</span>
     </div>`
   ).join('');
 }
@@ -1863,12 +1874,46 @@ function setPage(page) {
 // ═══════════════════════════════════════
 // Rendering — Main
 // ═══════════════════════════════════════
+const TIMELINE_BUFFER_MONTHS = 12;
+let _todayPx = null;
+
+// Timeline spans well beyond the data + today on both sides so it feels endless.
+function computeTimeRange() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  let lo = new Date(today), hi = new Date(today);
+  state.tasks.forEach(t => {
+    if (!isTaskScheduled(t)) return;
+    const s = parseDate(t.start), e = parseDate(t.end);
+    if (s < lo) lo = s;
+    if (e > hi) hi = e;
+  });
+  const start = new Date(lo.getFullYear(), lo.getMonth() - TIMELINE_BUFFER_MONTHS, 1);
+  const end = new Date(hi.getFullYear(), hi.getMonth() + TIMELINE_BUFFER_MONTHS + 1, 0);
+  return { start, end };
+}
+
+function rowLabelWidth() {
+  return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--row-label-width'));
+}
+
+function todayFlagHtml() {
+  if (_todayPx == null) return '';
+  return `<div class="today-flag" style="left:${rowLabelWidth() + _todayPx}px">今日</div>`;
+}
+
+function scrollToToday() {
+  const wrap = document.getElementById('ganttWrapper');
+  if (!wrap || _todayPx == null) return;
+  const labelW = rowLabelWidth();
+  const visible = Math.max(0, wrap.clientWidth - labelW);
+  wrap.scrollLeft = Math.max(0, labelW + _todayPx - visible * 0.3);
+}
+
 function render() {
   saveStateLocal();
   const { overlapMap, personOverlapMap, overlapPeriods, personOverloaded } = detectOverlaps();
   const hideWeekend = document.getElementById('chkHideWeekend').checked;
-  const timeStart = parseDate(state.startDate);
-  const timeEnd = parseDate(state.endDate);
+  const { start: timeStart, end: timeEnd } = computeTimeRange();
   const today = new Date(); today.setHours(0,0,0,0);
 
   renderSidebar(overlapMap, overlapPeriods, personOverloaded);
@@ -1890,10 +1935,9 @@ function render() {
 function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
   renderRoleList();
   document.getElementById('projectLegend').innerHTML = state.projects.map(p =>
-    `<div class="project-legend" style="cursor:pointer" onclick="openProjectModal('${p.id}')">
+    `<div class="project-legend">
       <div class="project-dot" style="background:${p.color}"></div>
       <span>${p.name}</span>
-      <span style="margin-left:auto;font-size:.7rem;color:var(--text-secondary);opacity:.5">✎</span>
     </div>`
   ).join('');
 
@@ -1903,13 +1947,10 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
     const po = personOverloaded[p.id];
     const isOL = po?.overloaded;
     const rc = getRoleColor(p);
-    return `<div class="person-item" draggable="true" data-drag-id="${p.id}" data-drag-type="person"
-      ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
-      <span class="drag-handle">⋮⋮</span>
+    return `<div class="person-item">
       <div class="person-avatar" style="background:${rc}">${p.name[0]}</div>
-      <div class="person-info" onclick="event.stopPropagation();openPersonModal('${p.id}')" style="cursor:pointer"><div class="person-name">${p.name} <span style="font-size:.65rem;opacity:.5">✎</span></div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務${p.leaveDate ? ' · 離職 '+shortDate(p.leaveDate) : ''}</div></div>
+      <div class="person-info"><div class="person-name">${p.name}</div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務${p.leaveDate ? ' · 離職 '+shortDate(p.leaveDate) : ''}</div></div>
       ${isOL ? `<span class="person-overload">超載 (${po.max})</span>` : ''}
-      <button class="btn-sm" onclick="event.stopPropagation();removePerson('${p.id}')" style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:.85rem;font-weight:700;padding:2px 4px;opacity:.7;transition:opacity .15s" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.7">&times;</button>
     </div>`;
   }).join('');
 
@@ -1935,7 +1976,6 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
       return `<div class="task-list-item" onclick="openTaskModal('${t.id}')">
         <div class="task-list-dot" style="background:${proj?.color||'#999'}"></div>
         <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${metaParts.join(' · ')}</div></div>
-        <div class="task-list-actions"><button class="btn btn-sm" onclick="event.stopPropagation();openTaskModal('${t.id}')">編輯</button></div>
       </div>`;
     }).join('');
 }
@@ -1965,7 +2005,13 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap
     const cls = []; if (isWeekend(d)) cls.push('weekend'); if (formatDate(d)===formatDate(today)) cls.push('today');
     html += `<div class="gantt-day-header ${cls.join(' ')}" style="width:${dayWidth}px"><div style="line-height:1.1;text-align:center"><div>${d.getDate()}</div><div style="font-size:.6rem">${DAY_NAMES[d.getDay()]}</div></div></div>`;
   });
-  html += '</div></div><div class="gantt-body">';
+  let _tIdx = dayIndex[formatDate(today)];
+  if (_tIdx === undefined) {
+    const totalDays = daysBetween(timeStart, timeEnd) + 1;
+    _tIdx = Math.round(daysBetween(timeStart, today) / totalDays * days.length);
+  }
+  _todayPx = _tIdx * dayWidth;
+  html += '</div>' + todayFlagHtml() + '</div><div class="gantt-body">';
   state.people.forEach(person => {
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id) && isTaskScheduled(t));
     const { laneMap, laneCount } = assignLanes(pTasks);
@@ -2016,11 +2062,12 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMa
   const taskHeight = 24;
   const taskGap = 2;
   const totalWidth = weeks.length * weekWidth;
+  _todayPx = dateToPx(today, timeStart, timeEnd, totalWidth);
 
   let html = '<div class="gantt-header"><div class="gantt-header-row">';
   html += '<div class="gantt-corner" style="height:36px">成員 / 週</div>';
   weeks.forEach(w => { html += `<div class="gantt-week-header" style="width:${weekWidth}px;font-size:.65rem;line-height:1.3">${w.label}</div>`; });
-  html += '</div></div><div class="gantt-body">';
+  html += '</div>' + todayFlagHtml() + '</div><div class="gantt-body">';
 
   state.people.forEach(person => {
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id) && isTaskScheduled(t));
@@ -2035,6 +2082,7 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMa
     weeks.forEach((w, i) => {
       html += `<div class="gantt-grid-line week-border" style="left:${i * weekWidth}px"></div>`;
     });
+    html += `<div class="gantt-grid-line today" style="left:${_todayPx}px"></div>`;
 
     overlapPeriods.filter(o => o.personId === person.id).forEach(o => {
       const oS = parseDate(o.overlapStart), oE = parseDate(o.overlapEnd);
@@ -2094,13 +2142,14 @@ function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPe
   const taskHeight = 24;
   const taskGap = 2;
   const totalWidth = months.length * monthWidth;
+  _todayPx = dateToPx(today, timeStart, timeEnd, totalWidth);
 
   let html = '<div class="gantt-header"><div class="gantt-header-row">';
   html += '<div class="gantt-corner" style="height:36px">成員 / 月</div>';
   months.forEach(m => {
     html += `<div class="gantt-week-header" style="width:${monthWidth}px;font-size:.8rem">${m.label}</div>`;
   });
-  html += '</div></div><div class="gantt-body">';
+  html += '</div>' + todayFlagHtml() + '</div><div class="gantt-body">';
 
   state.people.forEach(person => {
     const pTasks = state.tasks.filter(t => isAssignedTo(t, person.id) && isTaskScheduled(t));
@@ -2115,6 +2164,7 @@ function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPe
     months.forEach((m, i) => {
       html += `<div class="gantt-grid-line week-border" style="left:${i * monthWidth}px"></div>`;
     });
+    html += `<div class="gantt-grid-line today" style="left:${_todayPx}px"></div>`;
 
     overlapPeriods.filter(o => o.personId === person.id).forEach(o => {
       const oS = parseDate(o.overlapStart), oE = parseDate(o.overlapEnd);
@@ -2400,10 +2450,13 @@ function setViewMode(mode) {
   document.getElementById('btnWeekView').classList.toggle('active', mode === 'week');
   document.getElementById('btnMonthView').classList.toggle('active', mode === 'month');
   render();
+  requestAnimationFrame(scrollToToday);
 }
 function syncDateInputs() {
-  document.getElementById('inputStart').value = state.startDate;
-  document.getElementById('inputEnd').value = state.endDate;
+  const s = document.getElementById('inputStart');
+  const e = document.getElementById('inputEnd');
+  if (s) s.value = state.startDate || '';
+  if (e) e.value = state.endDate || '';
 }
 
 // ═══════════════════════════════════════
@@ -2525,12 +2578,10 @@ async function init() {
   applyReadOnlyUI();
   await loadState();
   await loadSyncStatus();
-  syncDateInputs();
-  document.getElementById('inputStart').addEventListener('change', e => { state.startDate = e.target.value; render(); });
-  document.getElementById('inputEnd').addEventListener('change', e => { state.endDate = e.target.value; render(); });
   setViewMode(state.viewMode || 'day');
   setPage(state.currentPage || 'gantt');
   isInitializing = false;
+  requestAnimationFrame(scrollToToday);
   subscribeToRealtime();
 }
 init();
