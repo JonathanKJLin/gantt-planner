@@ -122,6 +122,19 @@ body {
   color: #5b21b6;
 }
 .notion-banner a { color: #4f46e5; font-weight: 600; }
+.notion-sync-btn {
+  border: 1px solid #6366f1;
+  background: #6366f1;
+  color: #fff;
+  font-size: .78rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s, opacity .15s;
+}
+.notion-sync-btn:hover { background: #4f46e5; }
+.notion-sync-btn:disabled { opacity: .6; cursor: progress; }
 body.read-only .edit-only { display: none !important; }
 body.read-only [draggable="true"] { cursor: default; }
 body.read-only .drag-handle { display: none; }
@@ -814,6 +827,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 <div class="notion-banner" id="notionBanner" style="display:none">
   <span>📋 任務由 <strong>Notion</strong> 維護，此頁面為唯讀甘特圖</span>
   <span>上次同步：<span id="notionSyncTime">—</span></span>
+  <button type="button" id="notionSyncBtn" class="notion-sync-btn" onclick="syncFromNotion()">立即同步</button>
 </div>
 
 <!-- Top Bar -->
@@ -1137,6 +1151,45 @@ async function loadSyncStatus() {
     }
   } catch (err) {
     console.warn('Sync status unavailable:', err.message);
+  }
+}
+
+async function syncFromNotion() {
+  if (!NOTION_READ_ONLY) return;
+  const btn = document.getElementById('notionSyncBtn');
+  if (btn?.disabled) return;
+  if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
+  setSyncStatus('syncing');
+  try {
+    const pull = await sb.rpc('notion_pull_database_pages');
+    if (pull.error) throw pull.error;
+
+    const sync = await sb.rpc('sync_gantt_from_notion');
+    if (sync.error) throw sync.error;
+
+    const { data, error } = await sb.from('gantt_state').select('data').eq('id', 1).single();
+    if (error) throw error;
+    const remote = data?.data;
+    if (remote && remote.tasks) {
+      migrateState(remote);
+      const localPage = state?.currentPage;
+      const localView = state?.viewMode;
+      state = { ...remote, currentPage: localPage, viewMode: localView };
+      localStorage.setItem('gantt-planner-state', JSON.stringify(state));
+      syncDateInputs();
+      render();
+    }
+    await loadSyncStatus();
+    setSyncStatus('connected');
+    if (btn) btn.textContent = '已更新 ✓';
+    setTimeout(() => { if (btn) btn.textContent = '立即同步'; }, 2000);
+  } catch (err) {
+    console.error('Notion sync failed:', err);
+    alert('同步失敗：' + (err?.message || err) + '\n\n請稍後再試，或檢查 Notion 連線設定。');
+    setSyncStatus('offline');
+    if (btn) btn.textContent = '立即同步';
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

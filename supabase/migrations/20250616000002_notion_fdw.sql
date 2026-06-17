@@ -9,8 +9,8 @@ begin
     select 1 from pg_foreign_data_wrapper where fdwname = 'wasm_wrapper'
   ) then
     create foreign data wrapper wasm_wrapper
-      handler wasm_fdw_handler
-      validator wasm_fdw_validator;
+      handler extensions.wasm_fdw_handler
+      validator extensions.wasm_fdw_validator;
   end if;
 end $$;
 

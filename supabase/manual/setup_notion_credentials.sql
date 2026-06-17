@@ -1,4 +1,5 @@
--- Run once in Supabase SQL Editor BEFORE applying migration 20250616000002
+-- Run once in Supabase SQL Editor.
+-- ORDER: Step A → Step B → migration 002 (wasm_wrapper) → Step C → migrations 003–005
 --
 -- 1. Create a Notion Internal Integration: https://www.notion.so/profile/integrations
 -- 2. Copy the secret (starts with ntn_ or secret_)
