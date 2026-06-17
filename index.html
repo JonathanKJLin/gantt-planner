@@ -173,8 +173,9 @@ body.read-only .drag-handle { display: none; }
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
   padding: 6px;
-  min-width: 220px;
-  max-height: 320px;
+  min-width: 260px;
+  max-width: 380px;
+  max-height: 380px;
   overflow-y: auto;
 }
 .proj-filter-menu .pf-item {
@@ -189,6 +190,25 @@ body.read-only .drag-handle { display: none; }
 }
 .proj-filter-menu .pf-item:hover { background: #f5f7fa; }
 .proj-filter-menu .pf-all { border-bottom: 1px solid var(--border); font-weight: 600; margin-bottom: 2px; }
+.proj-filter-menu .pf-group-head { display: flex; align-items: center; }
+.proj-filter-menu .pf-caret {
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  color: #94a3b8;
+  font-size: .65rem;
+  cursor: pointer;
+  user-select: none;
+}
+.proj-filter-menu .pf-caret:hover { color: var(--accent); }
+.proj-filter-menu .pf-ls { flex: 1; min-width: 0; font-weight: 600; }
+.proj-filter-menu .pf-ls-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.proj-filter-menu .pf-ls-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.proj-filter-menu .pf-count { color: var(--text-secondary); font-size: .72rem; font-weight: 500; flex-shrink: 0; }
+.proj-filter-menu .pf-children { padding-left: 22px; }
+.proj-filter-menu .pf-child { font-weight: 400; }
+.proj-filter-menu .pf-child .pf-ls-name,
+.proj-filter-menu .pf-child { overflow: hidden; text-overflow: ellipsis; }
 .project-dot-edit { position: relative; display: inline-flex; cursor: pointer; line-height: 0; }
 .project-dot-edit input[type="color"] {
   position: absolute;
@@ -921,7 +941,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
     <button class="btn" id="btnToday" onclick="scrollToToday()">回到今日</button>
     <div class="proj-filter">
       <button class="btn" id="projFilterBtn" onclick="toggleProjFilterMenu(event)">專案篩選 ▾</button>
-      <div class="proj-filter-menu" id="projFilterMenu" style="display:none"></div>
+      <div class="proj-filter-menu" id="projFilterMenu" style="display:none" onclick="event.stopPropagation()"></div>
     </div>
     <div class="btn-group">
       <button class="btn active" id="btnDayView" onclick="setViewMode('day')">日檢視</button>
@@ -2156,15 +2176,71 @@ function updateProjFilterButton() {
   btn.textContent = (shown === total ? '專案篩選' : `專案篩選 (${shown}/${total})`) + ' ▾';
   btn.classList.toggle('active', shown !== total);
 }
+// Two-level filter: Landscape → Ultimate(Proj). Groups are collapsible so the
+// menu stays manageable when the whole team's database has many projects.
+let _pfExpanded = new Set();
+let _pfGroups = [];
+function landscapeKey(p) { return (p && p.landscape) ? p.landscape : '（未分類）'; }
+function groupProjectsByLandscape() {
+  const order = [];
+  const map = new Map();
+  (state.projects || []).forEach(p => {
+    const k = landscapeKey(p);
+    if (!map.has(k)) { map.set(k, []); order.push(k); }
+    map.get(k).push(p);
+  });
+  return order.map(name => ({ name, projects: map.get(name) }));
+}
+function landscapeState(projects) {
+  const vis = projects.filter(p => isProjectVisible(p.id)).length;
+  if (vis === 0) return 'none';
+  if (vis === projects.length) return 'all';
+  return 'some';
+}
+function toggleLandscapeExpand(i) {
+  const g = _pfGroups[i]; if (!g) return;
+  if (_pfExpanded.has(g.name)) _pfExpanded.delete(g.name); else _pfExpanded.add(g.name);
+  renderProjFilterMenu();
+}
+function toggleLandscapeFilter(i, checked) {
+  const g = _pfGroups[i]; if (!g) return;
+  g.projects.forEach(p => { if (checked) _projectExcluded.delete(p.id); else _projectExcluded.add(p.id); });
+  saveProjectFilter();
+  render();
+  renderProjFilterMenu();
+}
 function renderProjFilterMenu() {
   const menu = document.getElementById('projFilterMenu');
   if (!menu) return;
+  _pfGroups = groupProjectsByLandscape();
   const allChecked = (state.projects || []).every(p => isProjectVisible(p.id));
-  menu.innerHTML =
-    `<label class="pf-item pf-all"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="setAllProjectsFilter(this.checked)"> 全選 / 全不選</label>` +
-    (state.projects || []).map(p =>
-      `<label class="pf-item"><input type="checkbox" ${isProjectVisible(p.id) ? 'checked' : ''} onchange="toggleProjectFilter('${p.id}', this.checked)"><span class="project-dot" style="background:${p.color}"></span>${projectDisplayName(p)}</label>`
-    ).join('');
+  let html = `<label class="pf-item pf-all"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="setAllProjectsFilter(this.checked)"> 全選 / 全不選</label>`;
+  _pfGroups.forEach((g, i) => {
+    const st = landscapeState(g.projects);
+    const expanded = _pfExpanded.has(g.name);
+    const visCount = g.projects.filter(p => isProjectVisible(p.id)).length;
+    html += `<div class="pf-group">
+      <div class="pf-group-head">
+        <span class="pf-caret" onclick="toggleLandscapeExpand(${i})">${expanded ? '▾' : '▸'}</span>
+        <label class="pf-item pf-ls">
+          <input type="checkbox" data-pf-ls="${i}" ${st === 'all' ? 'checked' : ''} onchange="toggleLandscapeFilter(${i}, this.checked)">
+          <span class="pf-ls-dot" style="background:${landscapeColor(g.name)}"></span>
+          <span class="pf-ls-name">${g.name}</span>
+          <span class="pf-count">${visCount}/${g.projects.length}</span>
+        </label>
+      </div>`;
+    if (expanded) {
+      html += `<div class="pf-children">` + g.projects.map(p =>
+        `<label class="pf-item pf-child"><input type="checkbox" ${isProjectVisible(p.id) ? 'checked' : ''} onchange="toggleProjectFilter('${p.id}', this.checked)"><span class="project-dot" style="background:${p.color}"></span>${projectDisplayName(p)}</label>`
+      ).join('') + `</div>`;
+    }
+    html += `</div>`;
+  });
+  menu.innerHTML = html;
+  _pfGroups.forEach((g, i) => {
+    const cb = menu.querySelector(`input[data-pf-ls="${i}"]`);
+    if (cb) cb.indeterminate = (landscapeState(g.projects) === 'some');
+  });
 }
 function toggleProjFilterMenu(e) {
   if (e) e.stopPropagation();
