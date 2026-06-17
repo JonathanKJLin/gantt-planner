@@ -268,6 +268,28 @@ input[type="date"], select {
   padding: 0 2px;
 }
 .drag-handle:active { cursor: grabbing; }
+.pv-drag-handle {
+  cursor: grab;
+  color: #c5ccd4;
+  font-size: .75rem;
+  user-select: none;
+  letter-spacing: 1px;
+  margin-right: 4px;
+}
+.pv-drag-handle:active { cursor: grabbing; }
+.pv-table tr.dragging { opacity: .4; }
+.pv-reset-order {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: .75rem;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+  align-self: center;
+}
+.pv-reset-order:hover { border-color: var(--accent); color: var(--accent); }
 [draggable="true"] { transition: opacity .15s; }
 [draggable="true"].drag-over { box-shadow: 0 -2px 0 0 var(--accent) inset; }
 [draggable="true"].dragging { opacity: .4; }
@@ -467,7 +489,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   font-size: .72rem;
   font-weight: 500;
   color: #fff;
-  cursor: pointer;
+  cursor: default;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -669,7 +691,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   border-radius: 6px;
   margin-bottom: 3px;
   font-size: .82rem;
-  cursor: pointer;
+  cursor: default;
   transition: background .1s;
 }
 .task-list-item:hover { background: #f5f7fa; }
@@ -1905,6 +1927,66 @@ function handleDragEnd(e) {
   _dragType = null;
 }
 
+// ── Project-view task reorder (web-only manual order, stored per project in
+//    localStorage; works in read-only mode and never touches Notion) ──
+function getTaskOrderMap() {
+  try { return JSON.parse(localStorage.getItem('gantt-task-order') || '{}'); } catch { return {}; }
+}
+function getTaskOrder(projId) {
+  const a = getTaskOrderMap()[projId];
+  return Array.isArray(a) ? a : null;
+}
+function setTaskOrder(projId, ids) {
+  const m = getTaskOrderMap();
+  m[projId] = ids;
+  localStorage.setItem('gantt-task-order', JSON.stringify(m));
+}
+function clearTaskOrder(projId) {
+  const m = getTaskOrderMap();
+  delete m[projId];
+  localStorage.setItem('gantt-task-order', JSON.stringify(m));
+  renderProjectView();
+}
+
+let _pvDragId = null, _pvDragProj = null;
+function pvDragStart(e) {
+  const el = e.target.closest('[data-drag-id]');
+  if (!el) return;
+  _pvDragId = el.dataset.dragId;
+  _pvDragProj = el.dataset.pvProj;
+  e.dataTransfer.effectAllowed = 'move';
+  requestAnimationFrame(() => el.classList.add('dragging'));
+}
+function pvDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const el = e.target.closest('[data-drag-id]');
+  if (el && el.dataset.pvProj === _pvDragProj && el.dataset.dragId !== _pvDragId) el.classList.add('drag-over');
+}
+function pvDragLeave(e) {
+  const el = e.target.closest('[data-drag-id]');
+  if (el) el.classList.remove('drag-over');
+}
+function pvDragEnd(e) {
+  document.querySelectorAll('.dragging,.drag-over').forEach(el => el.classList.remove('dragging', 'drag-over'));
+  _pvDragId = null;
+  _pvDragProj = null;
+}
+function pvDrop(e) {
+  e.preventDefault();
+  const el = e.target.closest('[data-drag-id]');
+  if (!el || !_pvDragId || el.dataset.pvProj !== _pvDragProj || el.dataset.dragId === _pvDragId) return;
+  const tbody = el.closest('tbody');
+  if (!tbody) return;
+  const ids = [...tbody.querySelectorAll('tr[data-drag-id]')].map(r => r.dataset.dragId);
+  const from = ids.indexOf(_pvDragId), to = ids.indexOf(el.dataset.dragId);
+  if (from < 0 || to < 0) return;
+  ids.splice(from, 1);
+  ids.splice(to, 0, _pvDragId);
+  setTaskOrder(_pvDragProj, ids);
+  renderProjectView();
+}
+
 function setPage(page) {
   state.currentPage = page;
   document.getElementById('tabGantt').classList.toggle('active', page === 'gantt');
@@ -2118,7 +2200,7 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
       if (t.wbsPath) metaParts.push(t.wbsPath);
       metaParts.push(getAssigneeNames(t));
       metaParts.push(isTaskScheduled(t) ? `${t.start} → ${t.end}` : '未排程');
-      return `<div class="task-list-item" onclick="openTaskModal('${t.id}')">
+      return `<div class="task-list-item">
         <div class="task-list-dot" style="background:${proj?.color||'#999'}"></div>
         <div class="task-list-info"><div class="task-list-name">${hasOL?'⚠ ':''}${t.name}</div><div class="task-list-meta">${metaParts.join(' · ')}</div></div>
       </div>`;
@@ -2190,7 +2272,7 @@ function renderDayGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMap
       else { si = dayIndex[t.start]; ei = dayIndex[t.end]; }
       if (si==null||ei==null) return;
       const left=si*dayWidth, width=(ei-si+1)*dayWidth, lane=laneMap[t.id]||0, top=4+lane*(taskHeight+taskGap), ol=isOverlapForPerson(personOverlapMap, person.id, t.id);
-      html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;background:${proj?.color||'#999'}" onclick="openTaskModal('${t.id}')" onmouseenter="showTooltip(event,'${t.id}')" onmousemove="moveTooltip(event)" onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
+      html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;background:${proj?.color||'#999'}" onmouseenter="showTooltip(event,'${t.id}')" onmousemove="moveTooltip(event)" onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
     });
     html += '</div></div>';
   });
@@ -2255,7 +2337,6 @@ function renderWeekGantt(timeStart, timeEnd, today, hideWeekend, personOverlapMa
       const ol = isOverlapForPerson(personOverlapMap, person.id, t.id);
 
       html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;height:${taskHeight}px;background:${proj?.color||'#999'};font-size:.68rem"
-        onclick="openTaskModal('${t.id}')"
         onmouseenter="showTooltip(event,'${t.id}')"
         onmousemove="moveTooltip(event)"
         onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
@@ -2337,7 +2418,6 @@ function renderMonthGantt(timeStart, timeEnd, today, personOverlapMap, overlapPe
       const ol = isOverlapForPerson(personOverlapMap, person.id, t.id);
 
       html += `<div class="gantt-task ${ol?'overlap':''}" style="left:${left}px;width:${width}px;top:${top}px;height:${taskHeight}px;background:${proj?.color||'#999'};font-size:.68rem"
-        onclick="openTaskModal('${t.id}')"
         onmouseenter="showTooltip(event,'${t.id}')"
         onmousemove="moveTooltip(event)"
         onmouseleave="hideTooltip()"><span class="task-label">${t.name}</span></div>`;
@@ -2371,6 +2451,18 @@ function renderProjectView() {
       if (!sa && sb) return 1;
       return (a.name || '').localeCompare(b.name || '', 'zh-Hant');
     });
+    // Apply local manual order override (drag-to-reorder; never written to Notion).
+    // Tasks in the saved order come first by that order; new/unknown tasks keep the
+    // default sort above and are appended at the end.
+    const manualOrder = getTaskOrder(proj.id);
+    if (manualOrder) {
+      const rank = id => { const i = manualOrder.indexOf(id); return i < 0 ? Infinity : i; };
+      projTasks.sort((a, b) => {
+        const ra = rank(a.id), rb = rank(b.id);
+        if (ra === Infinity && rb === Infinity) return 0;
+        return ra - rb;
+      });
+    }
     const totalDays = projTasks.reduce((s,t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     const participantMap = {};
     projTasks.forEach(t => {
@@ -2387,10 +2479,14 @@ function renderProjectView() {
     const lsBadge = proj.landscape
       ? `<span class="pv-landscape" style="background:${landscapeColor(proj.landscape)}">${proj.landscape}</span>`
       : '';
+    const resetBtn = manualOrder
+      ? `<button class="pv-reset-order" onclick="clearTaskOrder('${proj.id}')" title="清除手動排序，回到預設（依開始日期）">↺ 重設排序</button>`
+      : '';
     html += `<div class="pv-section">`;
     html += `<div class="pv-section-header">
       <div class="pv-color-bar" style="background:${proj.color}"></div>
       <div>${lsBadge}<h2>${projectDisplayName(proj)}</h2></div>
+      ${resetBtn}
       <div class="pv-stats">
         <div class="pv-stat"><div class="pv-stat-value">${projTasks.length}</div><div class="pv-stat-label">任務數</div></div>
         <div class="pv-stat"><div class="pv-stat-value">${participants.length}</div><div class="pv-stat-label">參與人數</div></div>
@@ -2404,14 +2500,14 @@ function renderProjectView() {
     projTasks.forEach(t => {
       const dur = taskDuration(t);
       const ol = overlapMap[t.id];
-      html += `<tr draggable="true" data-drag-id="${t.id}" data-drag-type="task"
-        ondragstart="handleDragStart(event)" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragend="handleDragEnd(event)" ondragleave="handleDragLeave(event)">
-        <td class="pv-task-name"><span class="drag-handle">⋮⋮</span> ${t.name}${ol ? '<span class="pv-overlap-badge">⚠ 重疊</span>' : ''}</td>
+      html += `<tr draggable="true" data-drag-id="${t.id}" data-pv-proj="${proj.id}"
+        ondragstart="pvDragStart(event)" ondragover="pvDragOver(event)" ondrop="pvDrop(event)" ondragend="pvDragEnd(event)" ondragleave="pvDragLeave(event)">
+        <td class="pv-task-name"><span class="pv-drag-handle" title="拖曳調整順序（僅限本頁面）">⋮⋮</span> ${t.name}${ol ? '<span class="pv-overlap-badge">⚠ 重疊</span>' : ''}</td>
         <td>${getAssigneeNames(t)}</td>
         <td>${shortDate(t.start)}</td>
         <td>${shortDate(t.end)}</td>
         <td style="text-align:right;font-weight:600">${isTaskScheduled(t) ? dur + ' 天' : '—'}</td>
-        <td><button class="pv-edit-btn" onclick="openTaskModal('${t.id}')">編輯</button></td>
+        <td><button class="pv-edit-btn edit-only" onclick="openTaskModal('${t.id}')">編輯</button></td>
       </tr>`;
     });
     html += '</tbody></table></div>';
@@ -2511,6 +2607,7 @@ function populateModalDropdowns() {
   ).join('');
 }
 function openTaskModal(taskId) {
+  if (NOTION_READ_ONLY) return;
   if (!taskId && guardEdit()) return;
   populateModalDropdowns();
   const modal = document.getElementById('modalOverlay');
