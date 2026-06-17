@@ -9,17 +9,19 @@
 ## 架構（Notion 版）
 
 ```
-Notion 任務資料庫 (Title / Date / People / 專案)
-        ↓  Notion FDW (Supabase Wrappers)
-        ↓  sync_gantt_from_notion() — 單向、定時
+Notion 任務資料庫 (Title / Date / Assignee / Tag / Parent item)
+        ↓  notion_pull_database_pages() — Notion Database Query API (http extension)
+   notion_page_cache (原始頁面 JSON 快取)
+        ↓  sync_gantt_from_notion() — 解析 WBS、單向
    gantt_state (JSON)
-        ↓  Realtime
+        ↓  Realtime / 重新載入
    index.html 甘特圖（唯讀）
 ```
 
 - **任務維護**：團隊在 Notion 編輯
 - **甘特圖**：自動反映 Notion 資料，此頁面不提供回寫
-- **同步頻率**：預設每 15 分鐘（`sync_config.sync_interval_min`）
+- **同步方式**：前端「**立即同步**」按鈕一鍵觸發（pull + sync），或在 SQL Editor 手動執行
+- **為何用 http extension 而非 FDW**：Notion FDW 的 `notion.pages` 只有在 `WHERE id = ...` 時可靠；用 database / parent 篩選會掃不到列。改用 Notion Database Query API 把整個 database（含 sub-items）抓進 `notion_page_cache`，再從快取解析 WBS。
 
 ---
 
@@ -56,11 +58,12 @@ Notion 任務資料庫 (Title / Date / People / 專案)
 - 人員參與度長條圖（每人投入幾天、佔比多少）
 - 跨專案人力分配矩陣（人 × 專案 的天數交叉表）
 
-### Notion 同步（新）
+### Notion 同步
 
-- 使用 Notion 既有欄位：**Title**、**Date**、**People**、**專案**
-- Supabase Notion FDW 讀取任務
-- 定時同步至 `gantt_state`，前端透過 Realtime 自動更新
+- 使用 Notion 既有欄位：**Title**、**Date**、**Assignee**、**Tag**、**Parent item**（sub-items）
+- 透過 Notion Database Query API（Supabase `http` extension）抓進 `notion_page_cache`
+- 解析 WBS 後同步至 `gantt_state`，前端重新載入後更新
+- 前端 banner 的「**立即同步**」按鈕可一鍵觸發，不需進 SQL Editor
 - 甘特圖 **唯讀**；編輯請回 Notion
 
 ### 匯出
@@ -70,7 +73,7 @@ Notion 任務資料庫 (Title / Date / People / 專案)
 ### 即時同步
 
 - 透過 Supabase 即時同步，多人打開同一網址看到同一份資料
-- Notion 同步完成後，頁面自動更新
+- 點「立即同步」完成後，頁面即更新；其他開著的頁面透過 Realtime 自動更新
 - 離線時自動 fallback 到本地快取
 
 ---
@@ -125,17 +128,22 @@ Notion 任務資料庫 (Title / Date / People / 專案)
    - **專案**（Relation 至專案 database）
 5. 從 database URL 複製 **Database ID**
 
-### 2. Supabase — Notion FDW
+### 2. Supabase
+
+先在 **Database → Extensions** 啟用 **`http`** extension。
 
 在 SQL Editor 依序執行：
 
-1. `supabase/manual/setup_notion_credentials.sql`（填入 API key 與 Vault key id）
+1. `supabase/manual/setup_notion_credentials.sql`（把 Notion token 存入 Vault，`name = 'notion'`）
 2. 套用 migrations（Dashboard → SQL 或 `supabase db push`）：
    - `20250616000001_baseline.sql`
    - `20250616000002_notion_fdw.sql`
    - `20250616000003_sync_from_notion.sql`
    - `20250616000004_wbs_hierarchy_sync.sql`
    - `20250616000005_notion_schema_from_workspace.sql`
+   - `20250617000006_notion_page_discovery.sql`
+   - `20250617000007_notion_database_query.sql` ← http extension 快取式 pull + sync（自含 helper）
+   - `20250617000008_sync_rpc_grants.sql` ← 授權 anon 觸發「立即同步」
 3. 設定 database id：
 
 ```sql
@@ -144,12 +152,15 @@ set value = 'YOUR_NOTION_DATABASE_ID'
 where key = 'notion_database_id';
 ```
 
-4. 手動執行首次同步：
+4. 手動執行首次同步（兩步；注意是 `SELECT` 不是 `CALL`）：
 
 ```sql
-select public.sync_gantt_from_notion();
+select public.notion_pull_database_pages() as cached_pages;  -- 抓 Notion → 快取
+select public.sync_gantt_from_notion();                      -- 快取 → gantt_state
 select * from public.gantt_sync_status;
 ```
+
+之後每次要從 Notion 更新，重跑上面前兩行即可，或直接在前端點「**立即同步**」。
 
 ### 3. 欄位對照（`sync_config`）
 
@@ -157,7 +168,23 @@ select * from public.gantt_sync_status;
 
 ### 4. 前端
 
-`index.html` 中 `NOTION_READ_ONLY = true` 表示不回寫 Supabase。部署至 GitHub Pages 後即可使用。
+`index.html` 中 `NOTION_READ_ONLY = true` 表示不回寫 Supabase，並隱藏新增專案／任務按鈕。部署至 GitHub Pages 後即可使用。
+
+---
+
+## 本地預覽
+
+前端是單一 `index.html`，但因為要用 Supabase JS 與 fetch，需透過 http 伺服器開啟（不能直接 `file://`）：
+
+```bash
+cd gantt-planner
+python3 -m http.server 8848
+# 瀏覽器開 http://127.0.0.1:8848/index.html
+```
+
+頁面會讀取 Supabase `gantt_state`，點「立即同步」即可從 Notion 拉最新資料。
+
+> **分支說明**：線上正式版部署自 `main`；Notion 唯讀同步 + 立即同步功能在 `second-version`（作為本地檢視的測試版）。切換：`git checkout second-version`。
 
 ---
 
@@ -165,10 +192,10 @@ select * from public.gantt_sync_status;
 
 ### 基本操作
 
-1. 打開 https://jonathankjlin.github.io/gantt-planner/
+1. 打開 https://jonathankjlin.github.io/gantt-planner/（或本地預覽）
 2. 首次載入需要 1-2 秒等待 Supabase 回應
 3. 在 **Notion** 新增 / 編輯任務
-4. 等待定時同步（或手動執行 `sync_gantt_from_notion()`）
+4. 回頁面點 banner 的「**立即同步**」按鈕（或在 SQL Editor 執行 pull + sync）
 5. 使用日 / 週 / 月切換不同粒度的甘特圖
 
 ### 編輯資料
@@ -199,8 +226,9 @@ select * from public.gantt_sync_status;
 ### 技術架構
 
 - 前端：原生 HTML / CSS / JavaScript（`index.html`）
-- 資料庫：Supabase PostgreSQL + Notion FDW + pg_cron
-- 部署：GitHub Pages
+- 資料庫：Supabase PostgreSQL + `http` extension（Notion Database Query API）+ `notion_page_cache`
+- 同步：`notion_pull_database_pages()` + `sync_gantt_from_notion()`（前端「立即同步」按鈕觸發）
+- 部署：GitHub Pages（`main` 為正式版）
 
 ---
 
@@ -225,6 +253,10 @@ supabase/
 └── migrations/
     ├── 20250616000001_baseline.sql
     ├── 20250616000002_notion_fdw.sql
+    ├── 20250616000003_sync_from_notion.sql
     ├── 20250616000004_wbs_hierarchy_sync.sql
-    └── 20250616000005_notion_schema_from_workspace.sql
+    ├── 20250616000005_notion_schema_from_workspace.sql
+    ├── 20250617000006_notion_page_discovery.sql
+    ├── 20250617000007_notion_database_query.sql   # http extension 快取式 pull + sync
+    └── 20250617000008_sync_rpc_grants.sql          # 授權 anon 觸發立即同步
 ```
