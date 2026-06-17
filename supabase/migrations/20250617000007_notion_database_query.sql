@@ -571,10 +571,8 @@ begin
       continue;
     end if;
 
+    -- Project name = Ultimate(Proj) title only; Landscape kept separately (frontend badge).
     v_project_name := v_leaf.project_title;
-    if v_leaf.landscape_title is not null and v_leaf.landscape_title <> v_project_name then
-      v_project_name := v_leaf.landscape_title || ' · ' || v_project_name;
-    end if;
 
     v_project_gantt_id := 'np_' || v_project_notion_id;
     v_project_map := v_project_map || jsonb_build_object(

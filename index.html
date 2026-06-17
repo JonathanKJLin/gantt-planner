@@ -530,8 +530,9 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   display: none;
 }
 .tooltip .tt-title { font-weight: 600; margin-bottom: 4px; }
-.tooltip .tt-row { display: flex; gap: 8px; }
-.tooltip .tt-label { color: #94a3b8; }
+.tooltip .tt-row { display: flex; gap: 8px; align-items: baseline; }
+.tooltip .tt-label { color: #94a3b8; white-space: nowrap; flex-shrink: 0; }
+.tooltip .tt-value { min-width: 0; word-break: break-word; }
 
 /* ── Modal ── */
 .modal-overlay {
@@ -678,6 +679,15 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   flex-shrink: 0;
 }
 .pv-section-header h2 { font-size: 1.05rem; font-weight: 600; }
+.pv-landscape {
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: .72rem;
+  font-weight: 600;
+  color: #1f2937;
+}
 .pv-stats {
   display: flex;
   gap: 20px;
@@ -1909,6 +1919,23 @@ function scrollToToday() {
   wrap.scrollLeft = Math.max(0, labelW + _todayPx - visible * 0.3);
 }
 
+// Project name = Ultimate(Proj) only; Landscape is shown separately as a badge.
+function projectDisplayName(proj) {
+  if (!proj) return '?';
+  const ls = proj.landscape;
+  if (ls && proj.name) {
+    const prefix = ls + ' · ';
+    if (proj.name.startsWith(prefix)) return proj.name.slice(prefix.length);
+  }
+  return proj.name || '?';
+}
+
+const LANDSCAPE_PALETTE = ['#e0e7ff','#dcfce7','#fef9c3','#fee2e2','#f3e8ff','#cffafe','#ffedd5','#fce7f3'];
+function landscapeColor(name) {
+  if (!name) return '#e5e7eb';
+  return LANDSCAPE_PALETTE[strHash(name) % LANDSCAPE_PALETTE.length];
+}
+
 function render() {
   saveStateLocal();
   const { overlapMap, personOverlapMap, overlapPeriods, personOverloaded } = detectOverlaps();
@@ -1937,7 +1964,7 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
   document.getElementById('projectLegend').innerHTML = state.projects.map(p =>
     `<div class="project-legend">
       <div class="project-dot" style="background:${p.color}"></div>
-      <span>${p.name}</span>
+      <span>${projectDisplayName(p)}</span>
     </div>`
   ).join('');
 
@@ -2239,10 +2266,13 @@ function renderProjectView() {
       .sort((a,b) => b.days - a.days);
     const maxDays = participants.length ? participants[0].days : 1;
 
+    const lsBadge = proj.landscape
+      ? `<span class="pv-landscape" style="background:${landscapeColor(proj.landscape)}">${proj.landscape}</span>`
+      : '';
     html += `<div class="pv-section">`;
     html += `<div class="pv-section-header">
       <div class="pv-color-bar" style="background:${proj.color}"></div>
-      <div><h2>${proj.name}</h2></div>
+      <div>${lsBadge}<h2>${projectDisplayName(proj)}</h2></div>
       <div class="pv-stats">
         <div class="pv-stat"><div class="pv-stat-value">${projTasks.length}</div><div class="pv-stat-label">任務數</div></div>
         <div class="pv-stat"><div class="pv-stat-value">${participants.length}</div><div class="pv-stat-label">參與人數</div></div>
@@ -2286,7 +2316,7 @@ function renderProjectView() {
   html += `<div class="pv-section">
     <div class="pv-section-header"><div class="pv-color-bar" style="background:var(--text)"></div><div><h2>跨專案人力分配矩陣</h2></div></div>
     <div class="pv-table-wrap"><table class="pv-matrix"><thead><tr><th>成員</th>`;
-  state.projects.forEach(p => { html += `<th style="color:${p.color}">${p.name.split('—')[0].trim()}</th>`; });
+  state.projects.forEach(p => { html += `<th style="color:${p.color}">${projectDisplayName(p)}</th>`; });
   html += '<th>總天數</th><th>專案數</th></tr></thead><tbody>';
 
   state.people.forEach(person => {
@@ -2339,10 +2369,10 @@ function showTooltip(e, taskId) {
     ? `${t.start} → ${t.end}（${dur}天）`
     : '尚未排程';
   const wbsHtml = t.wbsPath
-    ? `<div class="tt-row"><span class="tt-label">WBS：</span>${t.wbsPath}</div>`
+    ? `<div class="tt-row"><span class="tt-label">WBS：</span><span class="tt-value">${t.wbsPath}</span></div>`
     : '';
   const tip = document.getElementById('tooltip');
-  tip.innerHTML = `<div class="tt-title">${t.name}</div>${wbsHtml}<div class="tt-row"><span class="tt-label">專案：</span>${proj?.name||'?'}</div><div class="tt-row"><span class="tt-label">負責人：</span>${getAssigneeNames(t)}</div><div class="tt-row"><span class="tt-label">期間：</span>${scheduleHtml}</div>${olHtml}`;
+  tip.innerHTML = `<div class="tt-title">${t.name}</div>${wbsHtml}<div class="tt-row"><span class="tt-label">專案：</span><span class="tt-value">${projectDisplayName(proj)}</span></div><div class="tt-row"><span class="tt-label">負責人：</span><span class="tt-value">${getAssigneeNames(t)}</span></div><div class="tt-row"><span class="tt-label">期間：</span><span class="tt-value">${scheduleHtml}</span></div>${olHtml}`;
   tip.style.display = 'block';
   moveTooltip(e);
 }
