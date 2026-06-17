@@ -1617,7 +1617,7 @@ function isOverlapForPerson(personOverlapMap, personId, taskId) {
 // Lane Assignment
 // ═══════════════════════════════════════
 function assignLanes(tasks) {
-  const sorted = [...tasks].filter(isTaskScheduled).sort((a, b) => parseDate(a.start) - parseDate(b.start));
+  const sorted = [...tasks].filter(isTaskScheduled).sort((a, b) => (parseDate(a.start) - parseDate(b.start)) || manualOrderTieBreak(a, b));
   const lanes = [];
   const laneMap = {};
   sorted.forEach(t => {
@@ -1929,8 +1929,11 @@ function handleDragEnd(e) {
 
 // ── Project-view task reorder (web-only manual order, stored per project in
 //    localStorage; works in read-only mode and never touches Notion) ──
+let _taskOrderCache = null;
 function getTaskOrderMap() {
-  try { return JSON.parse(localStorage.getItem('gantt-task-order') || '{}'); } catch { return {}; }
+  if (_taskOrderCache) return _taskOrderCache;
+  try { _taskOrderCache = JSON.parse(localStorage.getItem('gantt-task-order') || '{}'); } catch { _taskOrderCache = {}; }
+  return _taskOrderCache;
 }
 function getTaskOrder(projId) {
   const a = getTaskOrderMap()[projId];
@@ -1940,12 +1943,30 @@ function setTaskOrder(projId, ids) {
   const m = getTaskOrderMap();
   m[projId] = ids;
   localStorage.setItem('gantt-task-order', JSON.stringify(m));
+  _taskOrderCache = null;
 }
 function clearTaskOrder(projId) {
   const m = getTaskOrderMap();
   delete m[projId];
   localStorage.setItem('gantt-task-order', JSON.stringify(m));
+  _taskOrderCache = null;
   renderProjectView();
+}
+// Rank of a task within its project's manual order (null if no override / not listed).
+// Used so the gantt vertical stacking follows the project-view custom order for
+// tasks that share a start date.
+function manualOrderRank(t) {
+  const o = getTaskOrder(t.projectId);
+  if (!o) return null;
+  const i = o.indexOf(t.id);
+  return i < 0 ? null : i;
+}
+function manualOrderTieBreak(a, b) {
+  const ra = manualOrderRank(a), rb = manualOrderRank(b);
+  if (ra == null && rb == null) return 0;
+  if (ra == null) return 1;
+  if (rb == null) return -1;
+  return ra - rb;
 }
 
 let _pvDragId = null, _pvDragProj = null;
