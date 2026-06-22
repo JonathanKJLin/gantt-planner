@@ -1309,6 +1309,10 @@ async function syncFromNotion() {
   if (btn?.disabled) return;
   if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
   setSyncStatus('syncing');
+  // Snapshot overrides NOW before the SQL function can wipe them.
+  // This is the authoritative fallback in case the SQL patch hasn't been applied yet,
+  // or if a race condition with Realtime fires first.
+  const preOverrides = collectWebOverrides();
   try {
     const pull = await sb.rpc('notion_pull_database_pages');
     if (pull.error) throw pull.error;
@@ -1320,7 +1324,7 @@ async function syncFromNotion() {
     if (error) throw error;
     const remote = data?.data;
     if (remote && remote.tasks) {
-      const overrides = remote._overrides || collectWebOverrides();
+      const overrides = remote._overrides || preOverrides;
       migrateState(remote);
       const localPage = state?.currentPage;
       const localView = state?.viewMode;
@@ -1570,10 +1574,13 @@ function subscribeToRealtime() {
       if (ignoreNextRealtime) return;
       const remote = payload.new?.data;
       if (remote && remote.tasks) {
+        // Preserve web-only overrides: prefer what's in the payload, fall back to current state
+        const overrides = remote._overrides || (NOTION_READ_ONLY ? collectWebOverrides() : null);
         migrateState(remote);
         const localPage = state.currentPage;
         const localView = state.viewMode;
         state = { ...remote, currentPage: localPage, viewMode: localView };
+        if (NOTION_READ_ONLY) applyWebOverrides(overrides);
         localStorage.setItem('gantt-planner-state', JSON.stringify(state));
         syncDateInputs();
         render();
