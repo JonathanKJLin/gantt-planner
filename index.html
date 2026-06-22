@@ -330,13 +330,65 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 .person-name { font-weight: 500; }
 .person-tasks-count { font-size: .75rem; color: var(--text-secondary); }
 .person-overload {
-  font-size: .65rem;
-  font-weight: 600;
-  color: var(--danger);
-  background: var(--danger-light);
-  padding: 2px 6px;
-  border-radius: 10px;
+  font-size: 1rem;
+  color: #f59e0b;
+  flex-shrink: 0;
+  cursor: default;
 }
+.role-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  margin-bottom: 2px;
+  font-size: .85rem;
+}
+.role-item:hover { background: #f5f7fa; }
+.role-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-count { font-size: .72rem; color: var(--text-secondary); flex-shrink: 0; }
+.role-edit-btn {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  font-size: .85rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity .15s, color .15s;
+  flex-shrink: 0;
+}
+.role-item:hover .role-edit-btn { opacity: 1; }
+.role-edit-btn:hover { color: var(--accent); }
+.role-person-row {
+  display: flex !important;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: .85rem;
+  line-height: 1.2;
+  margin-bottom: 0;
+}
+.role-person-row:hover { background: #f5f7fa; }
+.role-person-row input[type="checkbox"] { flex-shrink: 0; flex-grow: 0; width: auto !important; margin: 0; }
+.rp-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .62rem;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+.rp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-role { font-size: .72rem; color: var(--text-secondary); flex-shrink: 0; }
 .project-legend {
   display: flex;
   align-items: center;
@@ -969,7 +1021,7 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
         <div id="projectLegend"></div>
       </div>
       <div class="sidebar-section">
-        <h3>角色設定 <button class="btn btn-sm edit-only" onclick="openRoleModal()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
+        <h3>角色設定 <button class="btn btn-sm" id="btnAddRole" onclick="openRoleModal()" style="float:right;margin-top:-4px">＋ 新增</button></h3>
         <div id="roleList"></div>
       </div>
       <div class="sidebar-section">
@@ -1099,11 +1151,11 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
       <input type="hidden" id="roleEditIdx" value="-1">
       <div class="form-group">
         <label>角色名稱</label>
-        <input type="text" id="roleEditName" placeholder="例：外部顧問">
+        <input type="text" id="roleEditName" placeholder="例：外部顧問" oninput="renderRolePeoplePicker(this.value.trim())">
       </div>
       <div class="form-group">
-        <label>頭像顏色</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap" id="roleColorPicker"></div>
+        <label>成員指派 <span style="font-size:.75rem;color:var(--text-secondary);font-weight:400">（每人只能有一個身份，選取後舊身份自動移除）</span></label>
+        <div id="rolePeoplePicker" style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1825,25 +1877,51 @@ function renderRoleColorPicker() {
   ).join('');
 }
 
+function renderRolePeoplePicker(roleName) {
+  const container = document.getElementById('rolePeoplePicker');
+  if (!container) return;
+  container.innerHTML = (state.people || []).map(p =>
+    `<label class="role-person-row">
+      <input type="checkbox" value="${p.id}" ${p.role === roleName ? 'checked' : ''} onchange="toggleRolePerson('${p.id}', this.checked)">
+      <span class="rp-avatar" style="background:${getRoleColor(p)}">${p.name[0]}</span>
+      <span class="rp-name">${p.name}</span>
+      <span class="rp-role">${p.role || '（未指派）'}</span>
+    </label>`
+  ).join('') || '<div style="color:var(--text-secondary);font-size:.82rem;padding:4px">尚無成員</div>';
+}
+
+function toggleRolePerson(personId, checked) {
+  const idx = parseInt(document.getElementById('roleEditIdx').value);
+  const roleName = document.getElementById('roleEditName').value.trim() || (state.roles[idx]?.name);
+  const person = state.people.find(p => p.id === personId);
+  if (!person) return;
+  if (checked) {
+    person.role = roleName;
+  } else {
+    if (person.role === roleName) person.role = '';
+  }
+  // Re-render the picker so other rows reflect the change
+  renderRolePeoplePicker(roleName);
+}
+
 function openRoleModal(idx) {
-  if (guardEdit()) return;
   const deleteBtn = document.getElementById('btnDeleteRole');
+  let currentRoleName = '';
   if (idx !== undefined && idx >= 0) {
     const r = state.roles[idx];
     if (!r) return;
     document.getElementById('roleModalTitle').textContent = '編輯角色';
     document.getElementById('roleEditIdx').value = idx;
     document.getElementById('roleEditName').value = r.name;
-    selectedRoleColor = r.color;
+    currentRoleName = r.name;
     deleteBtn.style.display = '';
   } else {
     document.getElementById('roleModalTitle').textContent = '新增角色';
     document.getElementById('roleEditIdx').value = -1;
     document.getElementById('roleEditName').value = '';
-    selectedRoleColor = ROLE_PALETTE[state.roles.length % ROLE_PALETTE.length];
     deleteBtn.style.display = 'none';
   }
-  renderRoleColorPicker();
+  renderRolePeoplePicker(currentRoleName);
   document.getElementById('roleModalOverlay').classList.add('open');
   setTimeout(() => document.getElementById('roleEditName').focus(), 100);
 }
@@ -1853,25 +1931,31 @@ function closeRoleModal() {
 }
 
 function saveRole() {
-  if (guardEdit()) return;
   const idx = parseInt(document.getElementById('roleEditIdx').value);
   const name = document.getElementById('roleEditName').value.trim();
   if (!name) return alert('請輸入角色名稱');
   if (idx >= 0) {
     const oldName = state.roles[idx].name;
-    state.roles[idx] = { name, color: selectedRoleColor };
+    state.roles[idx].name = name;
+    // sync any remaining people still tagged with oldName
     if (oldName !== name) {
       state.people.forEach(p => { if (p.role === oldName) p.role = name; });
     }
   } else {
-    state.roles.push({ name, color: selectedRoleColor });
+    const color = ROLE_PALETTE[state.roles.length % ROLE_PALETTE.length];
+    state.roles.push({ name, color });
+    // assign any people checked in the picker to the new role
+    const picker = document.getElementById('rolePeoplePicker');
+    picker?.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+      const p = state.people.find(x => x.id === cb.value);
+      if (p) p.role = name;
+    });
   }
   closeRoleModal();
   render(); scheduleSnapshot();
 }
 
 function deleteRole() {
-  if (guardEdit()) return;
   const idx = parseInt(document.getElementById('roleEditIdx').value);
   if (idx < 0) return;
   const roleName = state.roles[idx].name;
@@ -1882,12 +1966,26 @@ function deleteRole() {
   render(); scheduleSnapshot();
 }
 
+function setRoleColor(idx, color) {
+  if (!state.roles[idx]) return;
+  state.roles[idx].color = color;
+  renderRoleList();
+  // re-render people list so avatars update immediately
+  const { personOverloaded } = detectOverlaps(getVisibleTasks());
+  renderSidebar({}, [], personOverloaded);
+  saveStateLocal(); scheduleSnapshot();
+}
+
 function renderRoleList() {
   document.getElementById('roleList').innerHTML = (state.roles || []).map((r, i) =>
-    `<div class="project-legend">
-      <div class="project-dot" style="background:${r.color};border-radius:50%"></div>
-      <span>${r.name}</span>
-      <span style="margin-left:auto;font-size:.72rem;color:var(--text-secondary)">${state.people.filter(p=>p.role===r.name).length} 人</span>
+    `<div class="role-item">
+      <label class="project-dot-edit" title="點擊修改顏色">
+        <span class="project-dot" style="background:${r.color};border-radius:50%"></span>
+        <input type="color" value="${r.color}" onchange="setRoleColor(${i}, this.value)">
+      </label>
+      <span class="role-name">${r.name}</span>
+      <span class="role-count">${state.people.filter(p=>p.role===r.name).length} 人</span>
+      <button class="role-edit-btn" onclick="openRoleModal(${i})" title="編輯角色 / 指派成員">✎</button>
     </div>`
   ).join('');
 }
@@ -2315,14 +2413,15 @@ function renderSidebar(overlapMap, overlapPeriods, personOverloaded) {
 
   document.getElementById('peopleCount').textContent = state.people.length;
   document.getElementById('peopleList').innerHTML = state.people.map(p => {
-    const taskCount = state.tasks.filter(t => isAssignedTo(t, p.id)).length;
+    // Only count tasks from currently visible (filtered) projects
+    const visibleTaskCount = state.tasks.filter(t => isAssignedTo(t, p.id) && isProjectVisible(t.projectId)).length;
     const po = personOverloaded[p.id];
     const isOL = po?.overloaded;
     const rc = getRoleColor(p);
     return `<div class="person-item">
       <div class="person-avatar" style="background:${rc}">${p.name[0]}</div>
-      <div class="person-info"><div class="person-name">${p.name}</div><div class="person-tasks-count">${p.role||''} · ${taskCount} 項任務${p.leaveDate ? ' · 離職 '+shortDate(p.leaveDate) : ''}</div></div>
-      ${isOL ? `<span class="person-overload">超載 (${po.max})</span>` : ''}
+      <div class="person-info"><div class="person-name">${p.name}</div><div class="person-tasks-count">${p.role||''} · ${visibleTaskCount} 項任務${p.leaveDate ? ' · 離職 '+shortDate(p.leaveDate) : ''}</div></div>
+      ${isOL ? `<span class="person-overload" title="注意：任務重疊（同時最多 ${po.max} 個）">⚠</span>` : ''}
     </div>`;
   }).join('');
 
