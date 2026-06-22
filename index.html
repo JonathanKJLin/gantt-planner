@@ -1320,10 +1320,12 @@ async function syncFromNotion() {
     if (error) throw error;
     const remote = data?.data;
     if (remote && remote.tasks) {
+      const overrides = remote._overrides || collectWebOverrides();
       migrateState(remote);
       const localPage = state?.currentPage;
       const localView = state?.viewMode;
       state = { ...remote, currentPage: localPage, viewMode: localView };
+      applyWebOverrides(overrides);
       localStorage.setItem('gantt-planner-state', JSON.stringify(state));
       syncDateInputs();
       render();
@@ -1398,13 +1400,17 @@ async function loadState() {
     if (error) throw error;
 
     if (data?.data && data.data.tasks && data.data.tasks.length > 0) {
+      const overrides = data.data._overrides;
       state = data.data;
       migrateState(state);
+      if (NOTION_READ_ONLY) applyWebOverrides(overrides);
       localStorage.setItem('gantt-planner-state', JSON.stringify(state));
       setSyncStatus('connected');
     } else if (NOTION_READ_ONLY) {
+      const overrides = data?.data?._overrides;
       state = data?.data ? data.data : { ...JSON.parse(JSON.stringify(DEFAULT_STATE)), tasks: [], projects: [], people: [] };
       migrateState(state);
+      applyWebOverrides(overrides);
       setSyncStatus('offline');
     } else if (local && local.tasks && local.tasks.length > 0) {
       await pushToSupabase();
@@ -1443,9 +1449,70 @@ async function pushToSupabase() {
   setTimeout(() => { ignoreNextRealtime = false; }, 500);
 }
 
+// ── Web-only overrides (roles, project colors, task order) ──────────────────
+// These are local customisations that are NOT sourced from Notion.
+// We persist them inside gantt_state.data._overrides in Supabase so they
+// survive page reloads and browser clears, and we re-apply them after every
+// state load / Notion sync so they are never wiped by remote data.
+
+function collectWebOverrides() {
+  const colorMap = {};
+  try { Object.assign(colorMap, JSON.parse(localStorage.getItem('gantt-project-colors') || '{}')); } catch {}
+  const orderMap = {};
+  try { Object.assign(orderMap, JSON.parse(localStorage.getItem('gantt-task-order') || '{}')); } catch {}
+  return {
+    roles: (state.roles || []).map(r => ({ name: r.name, color: r.color })),
+    personRoles: Object.fromEntries((state.people || []).map(p => [p.notionId || p.id, p.role || ''])),
+    projectColors: colorMap,
+    taskOrder: orderMap,
+  };
+}
+
+function applyWebOverrides(overrides) {
+  if (!overrides) return;
+  // Roles
+  if (Array.isArray(overrides.roles) && overrides.roles.length > 0) {
+    state.roles = overrides.roles;
+  }
+  // Person → role mapping
+  if (overrides.personRoles) {
+    (state.people || []).forEach(p => {
+      const key = p.notionId || p.id;
+      if (overrides.personRoles[key] !== undefined) p.role = overrides.personRoles[key];
+    });
+  }
+  // Project colors
+  if (overrides.projectColors && Object.keys(overrides.projectColors).length) {
+    localStorage.setItem('gantt-project-colors', JSON.stringify(overrides.projectColors));
+    _taskOrderCache = null;
+  }
+  // Task order
+  if (overrides.taskOrder && Object.keys(overrides.taskOrder).length) {
+    localStorage.setItem('gantt-task-order', JSON.stringify(overrides.taskOrder));
+    _taskOrderCache = null;
+  }
+}
+
+async function saveWebOverrides() {
+  if (!NOTION_READ_ONLY) return;
+  saveStateLocal();
+  const overrides = collectWebOverrides();
+  // Embed into gantt_state.data so it round-trips without a schema change
+  try {
+    const { data } = await sb.from('gantt_state').select('data').eq('id', 1).single();
+    const remote = data?.data || {};
+    remote._overrides = overrides;
+    await sb.from('gantt_state').update({ data: remote, updated_at: new Date().toISOString() }).eq('id', 1);
+  } catch (err) {
+    console.warn('saveWebOverrides failed:', err.message);
+  }
+}
+
 function scheduleSnapshot() {
   if (NOTION_READ_ONLY) {
     saveStateLocal();
+    // Fire-and-forget; don't await inside a sync function
+    saveWebOverrides();
     return;
   }
   saveState();
@@ -2062,6 +2129,7 @@ function setTaskOrder(projId, ids) {
   m[projId] = ids;
   localStorage.setItem('gantt-task-order', JSON.stringify(m));
   _taskOrderCache = null;
+  saveWebOverrides();
 }
 function clearTaskOrder(projId) {
   const m = getTaskOrderMap();
@@ -2069,6 +2137,7 @@ function clearTaskOrder(projId) {
   localStorage.setItem('gantt-task-order', JSON.stringify(m));
   _taskOrderCache = null;
   renderProjectView();
+  saveWebOverrides();
 }
 // Rank of a task within its project's manual order (null if no override / not listed).
 // Used so the gantt vertical stacking follows the project-view custom order for
@@ -2372,6 +2441,7 @@ function setProjectColor(projectId, color) {
   map[p.notionId || p.id] = color;
   localStorage.setItem('gantt-project-colors', JSON.stringify(map));
   render();
+  saveWebOverrides();
 }
 
 function render() {
