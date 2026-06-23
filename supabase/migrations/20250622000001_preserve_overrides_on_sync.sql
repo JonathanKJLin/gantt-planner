@@ -1,6 +1,11 @@
 -- Patch sync_gantt_from_notion to preserve _overrides written by the frontend.
--- The original function did `set data = v_notion_source` which wiped _overrides.
--- This version reads the existing _overrides before the UPDATE and re-embeds them.
+--
+-- The original 007 function did `set data = v_notion_source` which wiped the
+-- `_overrides` key (web-only roles / project colors / task order). This is the
+-- exact 007 function body with TWO additions only:
+--   1. read v_existing->'_overrides' into v_overrides
+--   2. re-embed v_overrides into v_notion_source before the UPDATE
+-- Everything else is identical to 20250617000007 so sync behaviour is unchanged.
 
 create or replace function public.sync_gantt_from_notion()
 returns jsonb
@@ -20,7 +25,7 @@ declare
   v_default_role text;
   v_default_hire text;
   v_existing jsonb;
-  v_overrides jsonb;          -- web-only overrides to preserve
+  v_overrides jsonb;          -- web-only overrides to preserve across syncs
   v_roles jsonb;
   v_start_date text;
   v_end_date text;
@@ -54,262 +59,290 @@ declare
   v_assignee record;
   v_cache_count int;
 begin
-  -- ── read existing overrides BEFORE we overwrite gantt_state ──────────────
-  select data->'_overrides' into v_overrides
-  from public.gantt_state
-  where id = 1;
-
-  -- ── Insert sync_log entry ─────────────────────────────────────────────────
-  insert into public.sync_log (started_at, status) values (now(), 'running')
+  insert into public.sync_log (status) values ('running')
   returning id into v_log_id;
 
-  -- ── Read config ───────────────────────────────────────────────────────────
-  select value into v_db_id      from public.app_config where key = 'notion_database_id';
-  select value into v_prop_date  from public.app_config where key = 'notion_prop_date';
-  select value into v_prop_tag   from public.app_config where key = 'notion_prop_tag';
-  select value into v_prop_parent from public.app_config where key = 'notion_prop_parent';
-  select value into v_prop_assignee from public.app_config where key = 'notion_prop_assignee';
-  select value into v_tag_landscape from public.app_config where key = 'notion_tag_landscape';
-  select value into v_tag_project  from public.app_config where key = 'notion_tag_project';
-  select value into v_default_role from public.app_config where key = 'default_role';
-  select value into v_default_hire from public.app_config where key = 'default_hire_date';
+  v_db_id := replace(public.notion_cfg('notion_database_id'), '-', '');
+  v_prop_date := public.notion_cfg('prop_date');
+  v_prop_tag := coalesce(public.notion_cfg('prop_tag'), 'Tag');
+  v_prop_parent := coalesce(public.notion_cfg('prop_parent'), 'Parent item');
+  v_prop_assignee := coalesce(nullif(public.notion_cfg('prop_assignee'), ''), 'Assignee');
+  v_tag_landscape := coalesce(public.notion_cfg('tag_landscape'), 'Landscape');
+  v_tag_project := coalesce(public.notion_cfg('tag_project'), 'Ultimate(Proj)');
+  v_default_role := public.notion_cfg('default_person_role');
+  v_default_hire := public.notion_cfg('default_hire_date');
 
-  v_prop_date     := coalesce(v_prop_date,    'Date');
-  v_prop_tag      := coalesce(v_prop_tag,     'Tag');
-  v_prop_parent   := coalesce(v_prop_parent,  'Parent item');
-  v_prop_assignee := coalesce(v_prop_assignee,'Assignee');
-  v_tag_landscape := coalesce(v_tag_landscape,'Landscape');
-  v_tag_project   := coalesce(v_tag_project,  'Ultimate(Proj)');
-  v_default_role  := coalesce(v_default_role, '');
-  v_default_hire  := coalesce(v_default_hire, '2024-01-01');
-
-  -- ── Load existing gantt_state for color/role continuity ───────────────────
-  select data into v_existing from public.gantt_state where id = 1;
-
-  -- Re-use existing roles list if available
-  if v_existing is not null and v_existing ? 'roles' then
-    v_roles := v_existing->'roles';
-  else
-    v_roles := '[]'::jsonb;
+  if v_db_id is null or v_db_id = 'REPLACE_WITH_NOTION_DATABASE_ID' then
+    raise exception 'sync_config.notion_database_id is not configured';
   end if;
 
-  -- ── Count cache entries ───────────────────────────────────────────────────
   select count(*) into v_cache_count from public.notion_page_cache;
+  if v_cache_count = 0 then
+    raise exception 'notion_page_cache is empty — run: SELECT public.notion_pull_database_pages();';
+  end if;
 
-  -- ── Build people & projects from cache ───────────────────────────────────
-  for v_page in
-    select
-      page_id,
-      attrs
-    from public.notion_page_cache
-    order by page_id
-  loop
-    v_props := v_page.attrs;
+  select data into v_existing from public.gantt_state where id = 1;
+  v_existing := coalesce(v_existing, '{}'::jsonb);
+  -- ➊ capture web-only overrides BEFORE we rebuild the state
+  v_overrides := v_existing->'_overrides';
+  v_roles := coalesce(v_existing->'roles', jsonb_build_array(
+    jsonb_build_object('name', '正職', 'color', '#f59e0b'),
+    jsonb_build_object('name', '實習生', 'color', '#9ca3af')
+  ));
+  v_start_date := v_existing->>'startDate';
+  v_end_date := v_existing->>'endDate';
 
-    -- ── Identify leaf nodes ──────────────────────────────────────────────────
-    -- A leaf: has an Assignee, has a Date, has Ultimate(Proj) ancestor,
-    --         is not itself a project/landscape node
-    for v_leaf in
-      with recursive
-      page_map as (
-        select page_id, attrs from public.notion_page_cache
-      ),
-      ancestry(page_id, attrs, root_id, depth) as (
-        select p.page_id, p.attrs, p.page_id, 0 from page_map p
-        union all
-        select a.page_id, a.attrs, pm.page_id, a.depth + 1
-        from ancestry a
-        join page_map pm on pm.page_id = public.notion_uuid_dashed(
-          a.attrs -> v_prop_parent -> 0 ->> 'id'
-        )
-        where a.depth < 10
-      ),
-      leaf_data as (
-        select distinct on (p.page_id)
-          p.page_id,
-          p.attrs,
-          bool_or(
-            coalesce(anc.attrs -> v_prop_tag -> 'multi_select', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', v_tag_project))
-          ) filter (where anc.page_id <> p.page_id) as has_ultimate_ancestor,
-          (select attrs from page_map where page_id = public.notion_uuid_dashed(
-            p.attrs -> v_prop_parent -> 0 ->> 'id'
-          )) as parent_attrs,
-          -- Get the project-tagged ancestor title
-          (select anc2.attrs -> 'title' -> 0 ->> 'plain_text'
-           from ancestry anc2
-           where anc2.page_id = p.page_id
-             and anc2.page_id <> p.page_id
-             and coalesce(anc2.attrs -> v_prop_tag -> 'multi_select', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', v_tag_project))
-           order by anc2.depth asc
-           limit 1
-          ) as project_title,
-          -- Get the landscape-tagged ancestor title
-          (select anc3.attrs -> 'title' -> 0 ->> 'plain_text'
-           from ancestry anc3
-           where anc3.page_id = p.page_id
-             and anc3.page_id <> p.page_id
-             and coalesce(anc3.attrs -> v_prop_tag -> 'multi_select', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', v_tag_landscape))
-           order by anc3.depth asc
-           limit 1
-          ) as landscape_title,
-          -- Get the project-tagged ancestor notion id
-          (select anc4.page_id
-           from ancestry anc4
-           where anc4.page_id = p.page_id
-             and anc4.page_id <> p.page_id
-             and coalesce(anc4.attrs -> v_prop_tag -> 'multi_select', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', v_tag_project))
-           order by anc4.depth asc
-           limit 1
-          ) as project_notion_id
-        from page_map p
-        left join ancestry anc on anc.page_id = p.page_id
-        where
-          -- has date
-          p.attrs -> v_prop_date ->> 'start' is not null
-          -- has assignee
-          and jsonb_array_length(coalesce(p.attrs -> v_prop_assignee -> 'people', '[]'::jsonb)) > 0
-          -- is not itself tagged as a project or landscape
-          and not (coalesce(p.attrs -> v_prop_tag -> 'multi_select', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', v_tag_project)))
-          and not (coalesce(p.attrs -> v_prop_tag -> 'multi_select', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('name', v_tag_landscape)))
-          -- has a parent
-          and p.attrs -> v_prop_parent -> 0 ->> 'id' is not null
-        group by p.page_id, p.attrs
-      )
-      select * from leaf_data
-      where has_ultimate_ancestor
-        and project_title is not null
-        and page_id = v_page.page_id
-    loop
+  create temp table _ni (
+    page_id   text primary key,
+    url       text,
+    title     text not null,
+    tag       text,
+    parent_id text,
+    date_start text,
+    date_end   text,
+    props     jsonb not null
+  ) on commit drop;
 
-      -- Project name = Ultimate(Proj) title only; Landscape kept separately (frontend badge).
-      v_project_name := v_leaf.project_title;
-      v_landscape_name := coalesce(v_leaf.landscape_title, '');
-      v_project_notion_id := coalesce(v_leaf.project_notion_id, '');
-
-      -- Assign or reuse project gantt id
-      if v_project_map ? v_project_notion_id then
-        v_project_gantt_id := v_project_map ->> v_project_notion_id;
-      else
-        v_project_gantt_id := 'proj-' || replace(gen_random_uuid()::text, '-', '');
-        -- Reuse existing project id for same notion id
-        if v_existing is not null then
-          select p ->> 'id' into v_project_gantt_id
-          from jsonb_array_elements(coalesce(v_existing -> 'projects', '[]'::jsonb)) p
-          where coalesce(p ->> 'notionId', '') = v_project_notion_id
-          limit 1;
-          if v_project_gantt_id is null then
-            v_project_gantt_id := 'proj-' || replace(gen_random_uuid()::text, '-', '');
-          end if;
-        end if;
-        v_project_map := v_project_map || jsonb_build_object(v_project_notion_id, v_project_gantt_id);
-
-        -- Lookup existing color or assign new
-        declare
-          v_existing_color text := null;
-        begin
-          if v_existing is not null then
-            select p ->> 'color' into v_existing_color
-            from jsonb_array_elements(coalesce(v_existing -> 'projects', '[]'::jsonb)) p
-            where coalesce(p ->> 'notionId', '') = v_project_notion_id
-            limit 1;
-          end if;
-
-          v_projects := v_projects || jsonb_build_array(jsonb_build_object(
-            'id',         v_project_gantt_id,
-            'notionId',   v_project_notion_id,
-            'name',       v_project_name,
-            'landscape',  v_landscape_name,
-            'color',      coalesce(v_existing_color, v_project_colors[v_color_idx])
-          ));
-          if v_existing_color is null then
-            v_color_idx := (v_color_idx % array_length(v_project_colors, 1)) + 1;
-          end if;
-        end;
-      end if;
-
-      -- ── Assignees → people ─────────────────────────────────────────────────
-      v_assignee_ids := '[]'::jsonb;
-      for v_assignee in
-        select
-          elem ->> 'id'   as notion_id,
-          elem ->> 'name' as person_name
-        from jsonb_array_elements(
-          coalesce(v_leaf.attrs -> v_prop_assignee -> 'people', '[]'::jsonb)
-        ) elem
-      loop
-        v_person_notion_id := public.notion_uuid_dashed(v_assignee.notion_id);
-        v_person_name      := coalesce(v_assignee.person_name, 'Unknown');
-
-        if v_person_map ? v_person_notion_id then
-          v_person_gantt_id := v_person_map ->> v_person_notion_id;
-        else
-          -- Reuse existing person id
-          v_person_gantt_id := null;
-          if v_existing is not null then
-            select p ->> 'id' into v_person_gantt_id
-            from jsonb_array_elements(coalesce(v_existing -> 'people', '[]'::jsonb)) p
-            where coalesce(p ->> 'notionId', '') = v_person_notion_id
-            limit 1;
-          end if;
-          if v_person_gantt_id is null then
-            v_person_gantt_id := 'person-' || replace(gen_random_uuid()::text, '-', '');
-          end if;
-          v_person_map := v_person_map || jsonb_build_object(v_person_notion_id, v_person_gantt_id);
-
-          -- Look up existing person for role/hire continuity
-          v_existing_person := null;
-          if v_existing is not null then
-            select p into v_existing_person
-            from jsonb_array_elements(coalesce(v_existing -> 'people', '[]'::jsonb)) p
-            where coalesce(p ->> 'notionId', '') = v_person_notion_id
-            limit 1;
-          end if;
-
-          v_people := v_people || jsonb_build_array(jsonb_build_object(
-            'id',        v_person_gantt_id,
-            'notionId',  v_person_notion_id,
-            'name',      v_person_name,
-            'role',      coalesce(v_existing_person ->> 'role', v_default_role),
-            'hireDate',  coalesce(v_existing_person ->> 'hireDate', v_default_hire),
-            'leaveDate', coalesce(v_existing_person ->> 'leaveDate', '')
-          ));
-        end if;
-
-        v_assignee_ids := v_assignee_ids || jsonb_build_array(v_person_gantt_id);
-      end loop;
-
-      -- ── Build task ────────────────────────────────────────────────────────
-      v_task := jsonb_build_object(
-        'id',         'task-' || replace(gen_random_uuid()::text, '-', ''),
-        'name',       coalesce(v_leaf.attrs -> 'title' -> 0 ->> 'plain_text', '(無標題)'),
-        'projectId',  v_project_gantt_id,
-        'assignees',  v_assignee_ids,
-        'start',      v_leaf.attrs -> v_prop_date ->> 'start',
-        'end',        coalesce(
-                        v_leaf.attrs -> v_prop_date ->> 'end',
-                        v_leaf.attrs -> v_prop_date ->> 'start'
-                      ),
-        'wbs',        coalesce(v_leaf.attrs -> 'wbs' ->> 'formula', ''),
-        'notionId',   v_leaf.page_id
-      );
-      v_tasks := v_tasks || jsonb_build_array(v_task);
-
-      -- Track date range
-      if v_min_date is null or (v_leaf.attrs -> v_prop_date ->> 'start')::date < v_min_date then
-        v_min_date := (v_leaf.attrs -> v_prop_date ->> 'start')::date;
-      end if;
-      if v_max_date is null or coalesce(v_leaf.attrs -> v_prop_date ->> 'end', v_leaf.attrs -> v_prop_date ->> 'start')::date > v_max_date then
-        v_max_date := coalesce(v_leaf.attrs -> v_prop_date ->> 'end', v_leaf.attrs -> v_prop_date ->> 'start')::date;
-      end if;
-    end loop;
+  for v_page in select page_id, url, attrs from public.notion_page_cache loop
+    v_props := coalesce(v_page.attrs->'properties', '{}'::jsonb);
+    insert into _ni (page_id, url, title, tag, parent_id, date_start, date_end, props)
+    values (
+      v_page.page_id,
+      v_page.url,
+      coalesce(public.notion_page_title(v_page.attrs), 'Untitled'),
+      public.notion_get_tag(v_props, v_prop_tag),
+      public.notion_resolve_parent_id(v_page.attrs, v_props, v_prop_parent),
+      public.notion_prop_date_start(v_props, v_prop_date),
+      public.notion_prop_date_end(v_props, v_prop_date),
+      v_props
+    );
   end loop;
 
-  -- ── Compute timeline ───────────────────────────────────────────────────────
-  if v_min_date is null then v_min_date := date_trunc('year', current_date)::date; end if;
-  if v_max_date is null then v_max_date := (date_trunc('year', current_date) + interval '1 year' - interval '1 day')::date; end if;
-  v_start_date := to_char(v_min_date - 30, 'YYYY-MM-DD');
-  v_end_date   := to_char(v_max_date + 30, 'YYYY-MM-DD');
+  create temp table _child_ids on commit drop as
+  select distinct parent_id as page_id
+  from _ni
+  where parent_id is not null
+  union
+  select distinct replace(c.attrs->'parent'->>'page_id', '-', '') as page_id
+  from public.notion_page_cache c
+  where coalesce(c.attrs->'parent'->>'type', '') = 'page_id'
+    and nullif(replace(c.attrs->'parent'->>'page_id', '-', ''), '') is not null;
 
+  create temp table _leaves on commit drop as
+  select n.*
+  from _ni n
+  where n.page_id not in (select page_id from _child_ids)
+    and not public.notion_tag_is(
+      n.props,
+      coalesce(public.notion_cfg('prop_tag'), 'Tag'),
+      coalesce(public.notion_cfg('tag_landscape'), 'Landscape')
+    );
+
+  create temp table _leaf_ctx on commit drop as
+  with recursive chain as (
+    select
+      l.page_id as leaf_id,
+      l.page_id as current_id,
+      l.parent_id,
+      l.title,
+      l.tag,
+      0 as depth
+    from _leaves l
+    union all
+    select
+      c.leaf_id,
+      ni.page_id,
+      ni.parent_id,
+      ni.title,
+      ni.tag,
+      c.depth + 1
+    from chain c
+    join _ni ni on ni.page_id = c.parent_id
+    where c.parent_id is not null
+  ),
+  project_pick as (
+    select distinct on (leaf_id)
+      leaf_id,
+      current_id as project_page_id,
+      title as project_title
+    from chain
+    where public.notion_tag_matches(tag, coalesce(public.notion_cfg('tag_project'), 'Ultimate(Proj)'))
+    order by leaf_id, depth asc
+  ),
+  landscape_pick as (
+    select distinct on (leaf_id)
+      leaf_id,
+      title as landscape_title
+    from chain
+    where public.notion_tag_matches(tag, coalesce(public.notion_cfg('tag_landscape'), 'Landscape'))
+    order by leaf_id, depth desc
+  ),
+  path_build as (
+    select
+      c.leaf_id,
+      string_agg(c.title, ' › ' order by c.depth desc) filter (
+        where c.depth > 0
+          and not public.notion_tag_matches(c.tag, coalesce(public.notion_cfg('tag_landscape'), 'Landscape'))
+          and not public.notion_tag_matches(c.tag, coalesce(public.notion_cfg('tag_project'), 'Ultimate(Proj)'))
+      ) as wbs_path
+    from chain c
+    group by c.leaf_id
+  )
+  select
+    l.page_id,
+    l.url,
+    l.title,
+    l.tag,
+    l.parent_id,
+    l.date_start,
+    l.date_end,
+    l.props,
+    pp.project_page_id,
+    pp.project_title,
+    lp.landscape_title,
+    pb.wbs_path
+  from _leaves l
+  left join project_pick pp on pp.leaf_id = l.page_id
+  left join landscape_pick lp on lp.leaf_id = l.page_id
+  left join path_build pb on pb.leaf_id = l.page_id;
+
+  for v_leaf in
+    select distinct project_page_id, project_title, landscape_title
+    from _leaf_ctx
+    where project_page_id is not null
+  loop
+    v_project_notion_id := v_leaf.project_page_id;
+    if v_project_map ? v_project_notion_id then
+      continue;
+    end if;
+
+    -- Project name = Ultimate(Proj) title only; Landscape kept separately (frontend badge).
+    v_project_name := v_leaf.project_title;
+
+    v_project_gantt_id := 'np_' || v_project_notion_id;
+    v_project_map := v_project_map || jsonb_build_object(
+      v_project_notion_id,
+      jsonb_build_object(
+        'id', v_project_gantt_id,
+        'name', v_project_name,
+        'color', v_project_colors[1 + ((v_color_idx - 1) % array_length(v_project_colors, 1))],
+        'notionId', v_project_notion_id,
+        'landscape', v_leaf.landscape_title
+      )
+    );
+    v_color_idx := v_color_idx + 1;
+  end loop;
+
+  select coalesce(jsonb_agg(value order by value->>'name'), '[]'::jsonb)
+  into v_projects
+  from jsonb_each(v_project_map);
+
+  if jsonb_array_length(v_projects) = 0 then
+    v_projects := jsonb_build_array(jsonb_build_object(
+      'id', 'np_unassigned',
+      'name', '未分類專案',
+      'color', '#6b7280',
+      'notionId', null
+    ));
+    v_project_map := jsonb_build_object('unassigned', v_projects->0);
+  end if;
+
+  for v_leaf in select * from _leaf_ctx loop
+    v_assignee_ids := '[]'::jsonb;
+    v_project_gantt_id := null;
+
+    if v_leaf.project_page_id is not null and v_project_map ? v_leaf.project_page_id then
+      v_project_gantt_id := v_project_map->v_leaf.project_page_id->>'id';
+    elsif v_project_map ? 'unassigned' then
+      v_project_gantt_id := 'np_unassigned';
+    elsif jsonb_array_length(v_projects) > 0 then
+      v_project_gantt_id := v_projects->0->>'id';
+    end if;
+
+    v_wbs_path := nullif(trim(both ' › ' from coalesce(v_leaf.wbs_path, '')), '');
+
+    for v_assignee in
+      select * from public.notion_extract_assignees(v_leaf.props, v_prop_assignee)
+    loop
+      v_person_name := trim(v_assignee.display_name);
+      if v_person_name = '' then
+        continue;
+      end if;
+
+      v_person_notion_id := coalesce(
+        nullif(replace(v_assignee.notion_user_id, '-', ''), ''),
+        public.notion_person_slug(v_person_name)
+      );
+
+      if v_person_map ? v_person_notion_id then
+        v_person_gantt_id := v_person_map->>v_person_notion_id;
+      else
+        v_person_gantt_id := case
+          when v_assignee.notion_user_id is not null then 'nu_' || v_person_notion_id
+          else public.notion_person_slug(v_person_name)
+        end;
+
+        v_existing_person := (
+          select elem
+          from jsonb_array_elements(coalesce(v_existing->'people', '[]'::jsonb)) elem
+          where lower(trim(elem->>'name')) = lower(v_person_name)
+             or replace(coalesce(elem->>'notionId', ''), '-', '') = v_person_notion_id
+             or elem->>'id' = v_person_gantt_id
+          limit 1
+        );
+
+        v_person_map := v_person_map || jsonb_build_object(v_person_notion_id, v_person_gantt_id);
+        v_people := v_people || jsonb_build_array(jsonb_build_object(
+          'id', v_person_gantt_id,
+          'name', coalesce(v_existing_person->>'name', v_person_name),
+          'role', coalesce(v_existing_person->>'role', v_default_role),
+          'hireDate', coalesce(v_existing_person->>'hireDate', v_default_hire),
+          'leaveDate', v_existing_person->'leaveDate',
+          'notionId', v_person_notion_id
+        ));
+      end if;
+
+      v_assignee_ids := v_assignee_ids || to_jsonb(v_person_gantt_id);
+    end loop;
+
+    v_task := jsonb_build_object(
+      'id', 'nt_' || v_leaf.page_id,
+      'notionId', v_leaf.page_id,
+      'notionUrl', v_leaf.url,
+      'name', v_leaf.title,
+      'wbsPath', v_wbs_path,
+      'notionTag', v_leaf.tag,
+      'projectId', v_project_gantt_id,
+      'assigneeIds', v_assignee_ids,
+      'start', v_leaf.date_start,
+      'end', v_leaf.date_end
+    );
+    v_tasks := v_tasks || jsonb_build_array(v_task);
+
+    if v_leaf.date_start is not null then
+      begin
+        if v_min_date is null or v_leaf.date_start::date < v_min_date then
+          v_min_date := v_leaf.date_start::date;
+        end if;
+      exception when others then null;
+      end;
+    end if;
+    if v_leaf.date_end is not null then
+      begin
+        if v_max_date is null or v_leaf.date_end::date > v_max_date then
+          v_max_date := v_leaf.date_end::date;
+        end if;
+      exception when others then null;
+      end;
+    end if;
+  end loop;
+
+  if v_start_date is null and v_min_date is not null then
+    v_start_date := to_char(date_trunc('month', v_min_date)::date, 'YYYY-MM-DD');
+  end if;
+  if v_end_date is null and v_max_date is not null then
+    v_end_date := to_char((date_trunc('month', v_max_date) + interval '1 month' - interval '1 day')::date, 'YYYY-MM-DD');
+  end if;
   if v_start_date is null then v_start_date := to_char(date_trunc('year', current_date)::date, 'YYYY-MM-DD'); end if;
   if v_end_date is null then v_end_date := to_char((date_trunc('year', current_date) + interval '1 year' - interval '1 day')::date, 'YYYY-MM-DD'); end if;
 
@@ -325,9 +358,7 @@ begin
     'lastNotionSync', now()
   );
 
-  -- ── Preserve web-only overrides ───────────────────────────────────────────
-  -- Re-embed the _overrides that were read at the start of this function,
-  -- so frontend customisations (roles, colors, task order) survive the sync.
+  -- ➋ re-embed web-only overrides so frontend customisations survive the sync
   if v_overrides is not null then
     v_notion_source := v_notion_source || jsonb_build_object('_overrides', v_overrides);
   end if;
