@@ -34,6 +34,7 @@ const {
   NOTION_VERSION,
 } = process.env;
 
+const NOTION_TOKEN_CLEAN = String(NOTION_TOKEN || '').trim();
 const PAGE_SIZE = Number(NOTION_PAGE_SIZE) || 100;
 const API_VERSION = NOTION_VERSION || '2022-06-28';
 const NOTION_API = 'https://api.notion.com/v1';
@@ -49,7 +50,12 @@ requireEnv('SUPABASE_URL', SUPABASE_URL);
 requireEnv('SUPABASE_SERVICE_ROLE_KEY', SUPABASE_SERVICE_ROLE_KEY);
 requireEnv('NOTION_TOKEN', NOTION_TOKEN);
 
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+// Trim whitespace/newlines and any trailing slash — a trailing "/" produces
+// "//rest/v1/..." which Supabase rejects with "Invalid path specified in request URL".
+const SUPABASE_URL_CLEAN = String(SUPABASE_URL).trim().replace(/\/+$/, '');
+const SERVICE_KEY_CLEAN = String(SUPABASE_SERVICE_ROLE_KEY).trim();
+
+const sb = createClient(SUPABASE_URL_CLEAN, SERVICE_KEY_CLEAN, {
   auth: { persistSession: false },
 });
 
@@ -67,7 +73,7 @@ async function notionQuery(databaseUuid, body, attempt = 0) {
   const res = await fetch(`${NOTION_API}/databases/${databaseUuid}/query`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${NOTION_TOKEN}`,
+      Authorization: `Bearer ${NOTION_TOKEN_CLEAN}`,
       'Notion-Version': API_VERSION,
       'Content-Type': 'application/json',
     },
