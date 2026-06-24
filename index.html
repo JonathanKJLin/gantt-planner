@@ -1355,10 +1355,12 @@ async function syncFromNotion() {
   const preOverrides = collectWebOverrides();
   try {
     // Pulling Notion -> cache is owned by the GitHub Action worker (incremental).
-    // The button just re-derives gantt_state from the latest cache and refetches,
-    // so it stays fast and never hits Notion API limits from the browser.
+    // The button does a best-effort local rebuild, then always refreshes the view
+    // to the latest gantt_state. The rebuild is allowed to fail (e.g. statement
+    // timeout on big datasets) without blocking the refresh — the worker keeps
+    // gantt_state up to date on its 15-min schedule anyway.
     const sync = await sb.rpc('sync_gantt_from_notion');
-    if (sync.error) throw sync.error;
+    if (sync.error) console.warn('Rebuild skipped (will rely on worker):', sync.error.message);
 
     const { data, error } = await sb.from('gantt_state').select('data').eq('id', 1).single();
     if (error) throw error;

@@ -322,6 +322,7 @@ supabase/
     ├── 20250622000001_preserve_overrides_on_sync.sql  # 同步時保留前端本地設定
     ├── 20250624000008_notion_sync_cursor.sql       # 增量同步 checkpoint 表
     ├── 20250624000009_landscape_allow_filter.sql   # 只顯示指定 Landscape（本地端篩選）
-    └── 20250624000010_require_schedule_dates.sql   # 只顯示有排程日期的任務
+    ├── 20250624000010_require_schedule_dates.sql   # 只顯示有排程日期的任務
+    └── 20250624000011_sync_statement_timeout.sql   # 提高 sync 函式 timeout（前端立即同步用）
 ```
 
