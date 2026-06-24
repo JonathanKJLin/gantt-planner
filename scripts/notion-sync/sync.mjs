@@ -55,6 +55,16 @@ requireEnv('NOTION_TOKEN', NOTION_TOKEN);
 const SUPABASE_URL_CLEAN = String(SUPABASE_URL).trim().replace(/\/+$/, '');
 const SERVICE_KEY_CLEAN = String(SUPABASE_SERVICE_ROLE_KEY).trim();
 
+try {
+  const u = new URL(SUPABASE_URL_CLEAN);
+  console.log(`Supabase target: host=${u.host} path="${u.pathname}"`);
+  if (!u.host.endsWith('.supabase.co') || (u.pathname && u.pathname !== '/')) {
+    console.warn('⚠ SUPABASE_URL looks wrong. Expected exactly https://<project-ref>.supabase.co (no path).');
+  }
+} catch {
+  console.error(`SUPABASE_URL is not a valid URL: "${SUPABASE_URL_CLEAN.slice(0, 60)}"`);
+}
+
 const sb = createClient(SUPABASE_URL_CLEAN, SERVICE_KEY_CLEAN, {
   auth: { persistSession: false },
 });
