@@ -96,7 +96,8 @@ Notion 任務資料庫 (Title / Date / Assignee / Tag / Parent-task)
 | `prop_tag`           | Tag            | 階層 tag 欄位                            |
 | `prop_parent`        | Parent item    | 指向父項目的 relation                      |
 | `prop_assignee`      | Assignee       | 負責人                                  |
-| `prop_date`          | Date           | 起迄日期                                 |
+| `prop_date`          | Date           | **排程起迄日**（指向 Notion 的 Date 屬性，需開啟 End date） |
+| `gantt_require_dates`| both           | `both`＝需有起始+結束才顯示／`start`＝只需起始／`off`＝不篩 |
 | `tag_landscape`      | Landscape      | 第 1 層 tag 值                          |
 | `tag_project`        | Ultimate(Proj) | 第 2 層 → 甘特專案（`Ultimate(...)` 開頭皆可匹配） |
 | `tag_parent`         | Parent         | 中間層 tag                              |
@@ -131,6 +132,28 @@ where key = 'gantt_landscape_allow';
 ```
 
 改完按前端「立即同步」或等下次 worker 跑就會生效。
+
+#### 設定排程時間（甘特圖時間軸）
+
+甘特圖的時間軸來自任務的 Date 屬性。**建議在 Notion 用「一個」Date 屬性並打開「End date」**，在同一欄填起始 + 結束日期（不需要兩個欄位，現有同步本來就會從同一個 Date 屬性讀 start/end）。
+
+1. 請 admin 在 Notion 新增一個 **Date** 屬性（例：`Gantt Date`），開啟 End date。
+2. 把 `prop_date` 指向該屬性：
+
+```sql
+update public.sync_config set value = 'Gantt Date' where key = 'prop_date';
+```
+
+3. 篩選規則由 `gantt_require_dates` 控制（預設 `both`＝只顯示有「起始 + 結束」的任務）：
+
+```sql
+-- 只需起始日（結束自動補成同一天，1 天長度）
+update public.sync_config set value = 'start' where key = 'gantt_require_dates';
+-- 完全不篩日期
+update public.sync_config set value = 'off' where key = 'gantt_require_dates';
+```
+
+只有填了日期的任務會出現在甘特圖上；沒填的任務（含其專案若整個都沒日期）會自動略過。
 
 ---
 
@@ -298,6 +321,7 @@ supabase/
     ├── 20250617000008_sync_rpc_grants.sql          # 授權 anon 觸發立即同步
     ├── 20250622000001_preserve_overrides_on_sync.sql  # 同步時保留前端本地設定
     ├── 20250624000008_notion_sync_cursor.sql       # 增量同步 checkpoint 表
-    └── 20250624000009_landscape_allow_filter.sql   # 只顯示指定 Landscape（本地端篩選）
+    ├── 20250624000009_landscape_allow_filter.sql   # 只顯示指定 Landscape（本地端篩選）
+    └── 20250624000010_require_schedule_dates.sql   # 只顯示有排程日期的任務
 ```
 

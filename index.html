@@ -783,6 +783,39 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
   overflow-y: auto;
   padding: 24px;
 }
+.pv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.pv-toolbar select,
+.pv-toolbar input[type="search"] {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: .85rem;
+  background: var(--bg);
+  color: var(--text);
+}
+.pv-toolbar select { max-width: 260px; cursor: pointer; }
+.pv-toolbar input[type="search"] { min-width: 220px; flex: 1; max-width: 360px; }
+.pv-toolbar .pv-toolbar-count { font-size: .8rem; color: var(--text-secondary); margin-left: auto; }
+.pv-empty {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
 .pv-section {
   background: var(--card);
   border-radius: var(--radius);
@@ -1045,6 +1078,13 @@ tr[draggable="true"].drag-over td { box-shadow: 0 -2px 0 0 var(--accent) inset; 
 
 <!-- ═══ PAGE: Project View ═══ -->
 <div class="page" id="pageProject">
+  <div class="pv-toolbar" id="pvToolbar">
+    <select id="pvLandscapeSel" onchange="onPvLandscapeChange(this.value)" title="依 Landscape 篩選"></select>
+    <select id="pvProjectSel" onchange="onPvProjectChange(this.value)" title="依專案篩選"></select>
+    <input type="search" id="pvSearchInput" placeholder="搜尋任務名稱…" oninput="onPvSearch(this.value)">
+    <button class="btn" onclick="clearPvFilter()">清除</button>
+    <span class="pv-toolbar-count" id="pvToolbarCount"></span>
+  </div>
   <div class="pv-scroll" id="projectViewContent"></div>
 </div>
 
@@ -2758,13 +2798,58 @@ function dateToPx(date, rangeStart, rangeEnd, totalPx) {
 // ═══════════════════════════════════════
 // Rendering — Project View
 // ═══════════════════════════════════════
+// ── Project-overview filter & search (transient UI state, not persisted) ──
+let pvFilter = { landscape: '', project: '', search: '' };
+function pvLandscapes() {
+  const seen = new Set(); const out = [];
+  (state.projects || []).forEach(p => { const k = landscapeKey(p); if (!seen.has(k)) { seen.add(k); out.push(k); } });
+  return out.sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
+function pvProjectsForLandscape(ls) {
+  return (state.projects || []).filter(p => !ls || landscapeKey(p) === ls);
+}
+function getPvVisibleProjects() {
+  let list = state.projects || [];
+  if (pvFilter.landscape) list = list.filter(p => landscapeKey(p) === pvFilter.landscape);
+  if (pvFilter.project) list = list.filter(p => p.id === pvFilter.project);
+  return list;
+}
+function onPvLandscapeChange(v) { pvFilter.landscape = v; pvFilter.project = ''; renderProjectView(); }
+function onPvProjectChange(v) { pvFilter.project = v; renderProjectView(); }
+function onPvSearch(v) { pvFilter.search = v; renderProjectView(); }
+function clearPvFilter() {
+  pvFilter = { landscape: '', project: '', search: '' };
+  const si = document.getElementById('pvSearchInput'); if (si) si.value = '';
+  renderProjectView();
+}
+function updatePvToolbar() {
+  const lsSel = document.getElementById('pvLandscapeSel');
+  const pjSel = document.getElementById('pvProjectSel');
+  const searchInput = document.getElementById('pvSearchInput');
+  if (!lsSel || !pjSel) return;
+  const esc = s => String(s).replace(/"/g, '&quot;');
+  const lss = pvLandscapes();
+  lsSel.innerHTML = `<option value="">全部 Landscape</option>` +
+    lss.map(l => `<option value="${esc(l)}" ${pvFilter.landscape === l ? 'selected' : ''}>${l}</option>`).join('');
+  const projs = pvProjectsForLandscape(pvFilter.landscape);
+  if (pvFilter.project && !projs.some(p => p.id === pvFilter.project)) pvFilter.project = '';
+  pjSel.innerHTML = `<option value="">全部專案</option>` +
+    projs.map(p => `<option value="${p.id}" ${pvFilter.project === p.id ? 'selected' : ''}>${projectDisplayName(p)}</option>`).join('');
+  if (searchInput && searchInput.value !== pvFilter.search) searchInput.value = pvFilter.search;
+}
+
 function renderProjectView() {
   const { overlapMap } = detectOverlaps();
+  updatePvToolbar();
+  const term = pvFilter.search.trim().toLowerCase();
+  const visibleProjects = getPvVisibleProjects();
   let html = '';
+  let sectionsRendered = 0;
+  let matchCount = 0;
 
   // Per-project sections
-  state.projects.forEach(proj => {
-    const projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a, b) => {
+  visibleProjects.forEach(proj => {
+    let projTasks = state.tasks.filter(t => t.projectId === proj.id).sort((a, b) => {
       const sa = isTaskScheduled(a), sb = isTaskScheduled(b);
       if (sa && sb) return parseDate(a.start) - parseDate(b.start);
       if (sa && !sb) return -1;
@@ -2782,6 +2867,13 @@ function renderProjectView() {
         if (ra === Infinity && rb === Infinity) return 0;
         return ra - rb;
       });
+    }
+    // Task-name search: hide non-matching rows; skip the project if nothing matches.
+    if (term) {
+      const matched = projTasks.filter(t => (t.name || '').toLowerCase().includes(term));
+      if (matched.length === 0) return;
+      projTasks = matched;
+      matchCount += matched.length;
     }
     const totalDays = projTasks.reduce((s,t) => s + taskDuration(t) * getAssigneeIds(t).length, 0);
     const participantMap = {};
@@ -2844,42 +2936,57 @@ function renderProjectView() {
       </div>`;
     });
     html += '</div></div>';
+    sectionsRendered++;
   });
 
-  // Cross-project matrix
-  html += `<div class="pv-section">
-    <div class="pv-section-header"><div class="pv-color-bar" style="background:var(--text)"></div><div><h2>跨專案人力分配矩陣</h2></div></div>
-    <div class="pv-table-wrap"><table class="pv-matrix"><thead><tr><th>成員</th>`;
-  state.projects.forEach(p => { html += `<th style="color:${p.color}">${projectDisplayName(p)}</th>`; });
-  html += '<th>總天數</th><th>專案數</th></tr></thead><tbody>';
+  // Cross-project matrix (columns follow the Landscape/Project filter).
+  if (visibleProjects.length > 0) {
+    html += `<div class="pv-section">
+      <div class="pv-section-header"><div class="pv-color-bar" style="background:var(--text)"></div><div><h2>跨專案人力分配矩陣</h2></div></div>
+      <div class="pv-table-wrap"><table class="pv-matrix"><thead><tr><th>成員</th>`;
+    visibleProjects.forEach(p => { html += `<th style="color:${p.color}">${projectDisplayName(p)}</th>`; });
+    html += '<th>總天數</th><th>專案數</th></tr></thead><tbody>';
 
-  state.people.forEach(person => {
-    let rowTotal = 0;
-    let projCount = 0;
-    let cells = '';
-    state.projects.forEach(proj => {
-      const days = state.tasks.filter(t => isAssignedTo(t, person.id) && t.projectId===proj.id).reduce((s,t) => s+taskDuration(t), 0);
-      rowTotal += days;
-      if (days > 0) projCount++;
-      cells += days > 0
-        ? `<td class="pv-cell-value" style="color:${proj.color}">${days} 天</td>`
-        : `<td class="pv-cell-zero">—</td>`;
+    state.people.forEach(person => {
+      let rowTotal = 0;
+      let projCount = 0;
+      let cells = '';
+      visibleProjects.forEach(proj => {
+        const days = state.tasks.filter(t => isAssignedTo(t, person.id) && t.projectId===proj.id).reduce((s,t) => s+taskDuration(t), 0);
+        rowTotal += days;
+        if (days > 0) projCount++;
+        cells += days > 0
+          ? `<td class="pv-cell-value" style="color:${proj.color}">${days} 天</td>`
+          : `<td class="pv-cell-zero">—</td>`;
+      });
+      if (rowTotal === 0) return;
+      html += `<tr><td>${person.name}</td>${cells}<td class="pv-total-cell">${rowTotal} 天</td><td class="pv-total-cell">${projCount}</td></tr>`;
     });
-    html += `<tr><td>${person.name}</td>${cells}<td class="pv-total-cell">${rowTotal} 天</td><td class="pv-total-cell">${projCount}</td></tr>`;
-  });
 
-  // Totals row
-  html += '<tr class="pv-row-total"><td>合計</td>';
-  let grandTotal = 0;
-  state.projects.forEach(proj => {
-    const d = state.tasks.filter(t=>t.projectId===proj.id).reduce((s,t)=>s+taskDuration(t)*getAssigneeIds(t).length,0);
-    grandTotal += d;
-    html += `<td style="color:${proj.color}">${d} 天</td>`;
-  });
-  html += `<td class="pv-total-cell">${grandTotal} 天</td><td></td></tr>`;
-  html += '</tbody></table></div></div>';
+    // Totals row
+    html += '<tr class="pv-row-total"><td>合計</td>';
+    let grandTotal = 0;
+    visibleProjects.forEach(proj => {
+      const d = state.tasks.filter(t=>t.projectId===proj.id).reduce((s,t)=>s+taskDuration(t)*getAssigneeIds(t).length,0);
+      grandTotal += d;
+      html += `<td style="color:${proj.color}">${d} 天</td>`;
+    });
+    html += `<td class="pv-total-cell">${grandTotal} 天</td><td></td></tr>`;
+    html += '</tbody></table></div></div>';
+  }
+
+  if (sectionsRendered === 0) {
+    html = `<div class="pv-empty">查無符合的${term ? '任務' : '專案'}${term ? `（搜尋：「${pvFilter.search}」）` : ''}。試著調整篩選或清除條件。</div>`;
+  }
 
   document.getElementById('projectViewContent').innerHTML = html;
+
+  const countEl = document.getElementById('pvToolbarCount');
+  if (countEl) {
+    countEl.textContent = term
+      ? `符合 ${matchCount} 筆任務 · ${sectionsRendered} 個專案`
+      : `顯示 ${visibleProjects.length} / ${(state.projects || []).length} 個專案`;
+  }
 }
 
 // ═══════════════════════════════════════
