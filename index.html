@@ -1310,13 +1310,12 @@ async function syncFromNotion() {
   if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
   setSyncStatus('syncing');
   // Snapshot overrides NOW before the SQL function can wipe them.
-  // This is the authoritative fallback in case the SQL patch hasn't been applied yet,
-  // or if a race condition with Realtime fires first.
+  // This is the authoritative fallback in case of a race condition with Realtime.
   const preOverrides = collectWebOverrides();
   try {
-    const pull = await sb.rpc('notion_pull_database_pages');
-    if (pull.error) throw pull.error;
-
+    // Pulling Notion -> cache is owned by the GitHub Action worker (incremental).
+    // The button just re-derives gantt_state from the latest cache and refetches,
+    // so it stays fast and never hits Notion API limits from the browser.
     const sync = await sb.rpc('sync_gantt_from_notion');
     if (sync.error) throw sync.error;
 

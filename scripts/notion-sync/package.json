@@ -1,0 +1,17 @@
+{
+  "name": "gantt-notion-sync",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Incremental Notion -> Supabase sync worker for Resource Gantt Planner",
+  "main": "sync.mjs",
+  "scripts": {
+    "sync": "node sync.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

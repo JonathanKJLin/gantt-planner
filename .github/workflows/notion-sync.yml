@@ -1,0 +1,41 @@
+name: Notion -> Supabase sync
+
+on:
+  schedule:
+    # Every 15 minutes (UTC). GitHub may delay scheduled runs under load.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      full_resync:
+        description: "Clear cache and re-pull the entire Notion database"
+        type: boolean
+        default: false
+
+# Avoid overlapping runs writing to the cache simultaneously.
+concurrency:
+  group: notion-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        working-directory: scripts/notion-sync
+        run: npm install --no-audit --no-fund
+
+      - name: Run sync
+        working-directory: scripts/notion-sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          FULL_RESYNC: ${{ inputs.full_resync }}
+        run: node sync.mjs
