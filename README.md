@@ -162,16 +162,19 @@ README.md
   - `anon public`：放到 `index.html`，前端可公開使用。
   - `service_role`：只放 GitHub Actions secret，不可放進前端、不應 commit。
 
-### Step 4. 套用 Supabase schema / migrations
+### Step 4. 套用公司版 Supabase setup SQL
 
-在新 Supabase project 套用 `supabase/migrations/` 內所有 SQL migration。可用 Supabase CLI：
+公司移轉時**不要逐一手動執行 `supabase/migrations/` 內所有歷史 migration**。那些 migration 包含開發過程中排查 Notion API timeout 的舊方案（例如 `notion_pull_*`、Vault/http pull、stepwise pull），目前正式同步主力已改為 GitHub Action worker。
 
-```bash
-supabase link --project-ref <new-project-ref>
-supabase db push
+請在新 Supabase project 的 **SQL Editor** 執行：
+
+```text
+supabase/manual/company_setup.sql
 ```
 
-若不用 CLI，也可以依檔名順序在 Supabase SQL Editor 執行 migration。至少要確認以下核心物件存在：
+這個檔案是公司移轉用的一次性 setup，已整理成新 Supabase project 必要且最新的 schema / function / policy / grant，不包含歷史實驗函式。
+
+執行完成後，至少要確認以下核心物件存在：
 
 - `public.gantt_state`
 - `public.sync_config`
@@ -182,6 +185,8 @@ supabase db push
 - `public.gantt_sync_status`
 
 > 注意：新 Supabase 專案是空的。即使 Notion 不變，也必須重新建立 schema、設定 `sync_config`、跑第一次 full resync。
+>
+> 補充：`supabase/migrations/` 仍保留作為開發歷史與增量變更紀錄；公司新帳號初始化請以 `company_setup.sql` 為主。
 
 ### Step 5. 設定 `sync_config`
 
